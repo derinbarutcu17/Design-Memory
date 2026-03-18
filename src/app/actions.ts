@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
 import { analyzeDrift } from "@/lib/audit";
+import { syncReferenceSnapshotFromFigma } from "@/lib/figma/normalize-reference";
 import { fetchPullRequest } from "@/lib/github";
 import { createProjectSchema, referenceSnapshotSchema } from "@/lib/schema";
 import { sampleReferenceSnapshot } from "@/lib/sample-reference";
@@ -23,6 +24,11 @@ import {
 } from "@/lib/store";
 import type { ReviewStatus } from "@/lib/types";
 import { makeId } from "@/lib/utils";
+
+function projectMessageRedirect(projectId: string, status: "success" | "error", message: string) {
+  const query = new URLSearchParams({ status, message });
+  redirect(`/projects/${projectId}?${query.toString()}`);
+}
 
 export async function createProjectAction(formData: FormData) {
   const parsed = createProjectSchema.parse({
@@ -51,16 +57,46 @@ export async function updateProjectAction(formData: FormData) {
 
 export async function importReferenceAction(formData: FormData) {
   const projectId = String(formData.get("projectId"));
-  const rawReference = String(formData.get("referenceJson"));
-  const parsed = referenceSnapshotSchema.parse(JSON.parse(rawReference));
-  createReferenceSnapshot(projectId, parsed);
-  revalidatePath(`/projects/${projectId}`);
+  try {
+    const rawReference = String(formData.get("referenceJson"));
+    const parsed = referenceSnapshotSchema.parse(JSON.parse(rawReference));
+    createReferenceSnapshot(projectId, parsed);
+    revalidatePath(`/projects/${projectId}`);
+    projectMessageRedirect(projectId, "success", "Fallback reference snapshot imported.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Manual import failed.";
+    projectMessageRedirect(projectId, "error", message);
+  }
 }
 
 export async function importSampleReferenceAction(formData: FormData) {
   const projectId = String(formData.get("projectId"));
   createReferenceSnapshot(projectId, sampleReferenceSnapshot);
   revalidatePath(`/projects/${projectId}`);
+  projectMessageRedirect(projectId, "success", "Sample fallback reference loaded.");
+}
+
+export async function syncFigmaReferenceAction(formData: FormData) {
+  const projectId = String(formData.get("projectId"));
+  const details = getProjectDetails(projectId);
+
+  if (!details) {
+    throw new Error("Project not found.");
+  }
+
+  try {
+    const snapshot = await syncReferenceSnapshotFromFigma(details.project.figmaFileKey);
+    createReferenceSnapshot(projectId, snapshot);
+    revalidatePath(`/projects/${projectId}`);
+    projectMessageRedirect(
+      projectId,
+      "success",
+      `Synced ${snapshot.metadata.componentCount ?? 0} components from Figma.`,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Figma sync failed.";
+    projectMessageRedirect(projectId, "error", message);
+  }
 }
 
 export async function runAuditAction(formData: FormData) {

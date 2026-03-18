@@ -1,4 +1,4 @@
-import { makeId, hashParts } from "@/lib/utils";
+import { generateNameCandidates, hashParts, makeId, normalizeForMatch, uniqueStrings } from "@/lib/utils";
 import type {
   AuditRun,
   DriftIssue,
@@ -82,6 +82,57 @@ function collectEvidence(text: string, patterns: string[]) {
   return lines.find((entry) => entry.trim())?.trim() ?? "No direct snippet available.";
 }
 
+function hasCandidateMatch(text: string, normalizedText: string, candidates: string[]) {
+  return candidates.some((candidate) => {
+    const normalized = normalizeForMatch(candidate);
+    return text.includes(candidate.toLowerCase()) || (normalized.length > 2 && normalizedText.includes(normalized));
+  });
+}
+
+function buildComponentCandidates(component: ReferenceSnapshot["components"][number]) {
+  return uniqueStrings([
+    component.name,
+    ...(component.codeMatches ?? []),
+    ...(component.aliases ?? []),
+    ...generateNameCandidates(component.name),
+  ]);
+}
+
+function buildTokenCandidateMap(snapshot: ReferenceSnapshot) {
+  const map = new Map<string, string[]>();
+
+  for (const token of snapshot.tokens) {
+    map.set(
+      token.name,
+      uniqueStrings([
+        token.name,
+        ...(token.aliases ?? []),
+        ...(token.codeHints ?? []),
+        ...(snapshot.aliasMap?.[token.name] ?? []),
+      ]),
+    );
+  }
+
+  return map;
+}
+
+function collectComponentTokenCandidates(
+  component: ReferenceSnapshot["components"][number],
+  tokenCandidateMap: Map<string, string[]>,
+) {
+  return uniqueStrings(
+    (component.tokensUsed ?? []).flatMap((tokenName) => tokenCandidateMap.get(tokenName) ?? []),
+  );
+}
+
+function findMatchedCandidates(text: string, normalizedText: string, candidates: string[]) {
+  return candidates.filter((candidate) => hasCandidateMatch(text, normalizedText, [candidate]));
+}
+
+function hasStyleSignals(text: string) {
+  return /className|style=\{\{|bg-|text-|border-|rounded-|px-|py-|shadow-|ring-/.test(text);
+}
+
 export function generateFixBrief(
   pr: PullRequestDetails,
   issues: DriftIssue[],
@@ -143,26 +194,37 @@ export function analyzeDrift(
   previous?: PreviousIssueState,
 ): AnalyzeResult {
   const issues: DriftIssue[] = [];
+  const tokenCandidateMap = buildTokenCandidateMap(snapshot);
 
   for (const file of pr.files) {
     const text = [file.patch ?? "", file.contents ?? ""].join("\n");
     const fileLower = `${file.filename}\n${text}`.toLowerCase();
+    const normalizedFile = normalizeForMatch(`${file.filename}\n${text}`);
 
     for (const component of snapshot.components) {
-      const matchers = [component.name, ...(component.codeMatches ?? [])].map((value) =>
-        value.toLowerCase(),
-      );
-      const componentMatch = matchers.some((value) => fileLower.includes(value));
+      const componentCandidates = buildComponentCandidates(component);
+      const componentMatch = hasCandidateMatch(fileLower, normalizedFile, componentCandidates);
 
       if (!componentMatch) {
         continue;
       }
 
+      const componentTokenCandidates = collectComponentTokenCandidates(component, tokenCandidateMap);
+      const matchedTokenCandidates = findMatchedCandidates(
+        fileLower,
+        normalizedFile,
+        componentTokenCandidates.map((candidate) => candidate.toLowerCase()),
+      );
       const missingPatterns = (component.requiredPatterns ?? []).filter(
         (pattern) => !text.includes(pattern),
       );
 
-      if (missingPatterns.length > 0) {
+      if (
+        missingPatterns.length > 0 ||
+        (componentTokenCandidates.length > 0 &&
+          matchedTokenCandidates.length === 0 &&
+          hasStyleSignals(text))
+      ) {
         issues.push(
           createIssue(
             auditRunId,
@@ -171,10 +233,17 @@ export function analyzeDrift(
             "token-mismatch",
             missingPatterns.length > 2 ? "high" : "medium",
             0.76,
-            `shared patterns ${missingPatterns.join(", ")}`,
-            "required patterns are absent from the changed implementation",
-            "Reintroduce the shared utility/token patterns used by the approved component.",
-            collectEvidence(text, [...missingPatterns, ...(component.codeMatches ?? [])]),
+            missingPatterns.length > 0
+              ? `shared patterns ${missingPatterns.join(", ")}`
+              : `recognized token aliases ${componentTokenCandidates.slice(0, 6).join(", ")}`,
+            matchedTokenCandidates.length > 0
+              ? `partial token coverage ${matchedTokenCandidates.join(", ")}`
+              : "no recognized token aliases or code hints were found in the changed implementation",
+            "Reintroduce the shared utility/token patterns or aliases used by the approved component.",
+            collectEvidence(
+              text,
+              [...missingPatterns, ...componentTokenCandidates, ...(component.codeMatches ?? [])].slice(0, 8),
+            ),
           ),
         );
       }
@@ -198,9 +267,11 @@ export function analyzeDrift(
             component.name,
             file.filename,
             "hardcoded-style",
-            "high",
-            0.86,
-            "shared tokens or named utilities from the approved system",
+            matchedTokenCandidates.length === 0 ? "high" : "medium",
+            matchedTokenCandidates.length === 0 ? 0.86 : 0.74,
+            componentTokenCandidates.length > 0
+              ? `shared tokens or aliases such as ${componentTokenCandidates.slice(0, 4).join(", ")}`
+              : "shared tokens or named utilities from the approved system",
             hardcodedSignals.length
               ? `hardcoded values ${hardcodedSignals.join(", ")}`
               : "disallowed raw styling pattern",
@@ -217,7 +288,10 @@ export function analyzeDrift(
         const allowedVariants = component.variants.map((variant) => variant.name);
         const detectedVariants = extractLikelyVariants(text);
         const unexpectedVariants = detectedVariants.filter(
-          (variant) => !allowedVariants.includes(variant),
+          (variant) =>
+            !allowedVariants.some(
+              (allowed) => normalizeForMatch(allowed) === normalizeForMatch(variant),
+            ),
         );
 
         if (unexpectedVariants.length > 0) {

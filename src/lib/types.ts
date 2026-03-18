@@ -18,6 +18,8 @@ export type ReferenceToken = {
   value?: string;
   aliases?: string[];
   codeHints?: string[];
+  sourceId?: string;
+  sourceType?: string;
 };
 
 export type ReferenceVariant = {
@@ -34,11 +36,14 @@ export type ReferenceState = {
 export type ComponentReference = {
   name: string;
   codeMatches?: string[];
+  aliases?: string[];
   summary?: string;
   requiredPatterns?: string[];
   disallowedPatterns?: string[];
   variants?: ReferenceVariant[];
   states?: ReferenceState[];
+  tokensUsed?: string[];
+  sourceNodeId?: string;
 };
 
 export type ReferenceSnapshot = {
@@ -47,6 +52,10 @@ export type ReferenceSnapshot = {
     versionLabel: string;
     figmaFileKey?: string;
     importedAt?: string;
+    fileName?: string;
+    lastModified?: string;
+    componentCount?: number;
+    tokenCount?: number;
   };
   tokens: ReferenceToken[];
   components: ComponentReference[];
