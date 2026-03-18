@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { PullRequestDetails, PullRequestFile } from "@/lib/types";
+import type { PullRequestDetails, PullRequestFile, PullRequestSummary } from "@/lib/types";
 
 const execFileAsync = promisify(execFile);
 
@@ -32,6 +32,34 @@ function isUiFile(fileName: string) {
   return /\.(tsx|jsx|ts|js|css|scss)$/.test(fileName);
 }
 
+export async function listOpenPullRequests(
+  owner: string,
+  repo: string,
+): Promise<PullRequestSummary[]> {
+  const pulls = await ghJson<
+    Array<{
+      number: number;
+      title: string;
+      html_url: string;
+      updated_at: string;
+      user?: { login?: string };
+    }>
+  >([`repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=10`]);
+
+  return pulls.map((pull) => ({
+    number: pull.number,
+    title: pull.title,
+    url: pull.html_url,
+    updatedAt: pull.updated_at,
+    authorLogin: pull.user?.login,
+  }));
+}
+
+export async function fetchLatestOpenPullRequest(owner: string, repo: string) {
+  const pulls = await listOpenPullRequests(owner, repo);
+  return pulls[0] ?? null;
+}
+
 export async function fetchPullRequest(
   owner: string,
   repo: string,
@@ -41,6 +69,7 @@ export async function fetchPullRequest(
     number: number;
     title: string;
     html_url: string;
+    updated_at: string;
     head: { sha: string };
   }>([`repos/${owner}/${repo}/pulls/${prNumber}`]);
 
@@ -80,6 +109,7 @@ export async function fetchPullRequest(
     title: pr.title,
     headSha: pr.head.sha,
     url: pr.html_url,
+    updatedAt: pr.updated_at,
     files: hydratedFiles,
   };
 }

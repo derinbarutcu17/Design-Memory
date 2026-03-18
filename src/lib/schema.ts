@@ -52,7 +52,6 @@ export const referenceSnapshotSchema = z.object({
 
 export const createProjectSchema = z.object({
   name: z.string().min(2),
-  repoOwner: z.string().min(1),
-  repoName: z.string().min(1),
-  figmaFileKey: z.string().min(1),
+  figmaUrl: z.string().url(),
+  repoUrl: z.string().url(),
 });

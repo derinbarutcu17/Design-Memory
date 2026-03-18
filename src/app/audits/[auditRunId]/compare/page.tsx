@@ -32,6 +32,11 @@ export default async function AuditComparePage({
             <h1 className="mt-2 text-4xl font-semibold tracking-tight text-white">
               PR #{auditRun.prNumber} comparison
             </h1>
+            <p className="mt-3 text-slate-300">
+              {auditRun.prSelectionMode === "auto-latest"
+                ? "Latest PR auto-check"
+                : "Manual PR selection"}
+            </p>
           </div>
           <Link
             href={`/audits/${auditRun.id}`}

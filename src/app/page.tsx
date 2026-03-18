@@ -7,7 +7,12 @@ import { formatDate } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
 
-export default function Home() {
+export default async function Home({
+  searchParams,
+}: {
+  searchParams?: Promise<{ status?: string; message?: string }>;
+}) {
+  const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const projects = listProjects();
   const auditRuns = projects.flatMap((project) =>
     listAuditRuns(project.id).slice(0, 2).map((run) => ({ project, run })),
@@ -16,6 +21,17 @@ export default function Home() {
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(56,189,248,0.16),_transparent_30%),linear-gradient(180deg,_#08111f,_#020617)] px-6 py-10 text-white">
       <div className="mx-auto flex max-w-7xl flex-col gap-8">
+        {resolvedSearchParams?.message ? (
+          <div
+            className={`rounded-3xl border px-5 py-4 text-sm ${
+              resolvedSearchParams.status === "error"
+                ? "border-rose-400/30 bg-rose-500/10 text-rose-100"
+                : "border-emerald-400/30 bg-emerald-500/10 text-emerald-100"
+            }`}
+          >
+            {resolvedSearchParams.message}
+          </div>
+        ) : null}
         <div className="grid gap-6 lg:grid-cols-[1.2fr_0.8fr]">
           <Surface className="overflow-hidden">
             <p className="text-xs uppercase tracking-[0.24em] text-sky-200/80">
@@ -41,7 +57,7 @@ export default function Home() {
               Create project
             </p>
             <h2 className="mt-2 text-2xl font-semibold text-white">
-              Start a new Figma-first audit flow
+              Connect Figma and repo once
             </h2>
 
             <form action={createProjectAction} className="mt-6 space-y-4">
@@ -54,33 +70,22 @@ export default function Home() {
                   placeholder="Design Memory Demo"
                 />
               </label>
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="block">
-                  <span className="mb-2 block text-sm text-slate-300">Repo owner</span>
-                  <input
-                    name="repoOwner"
-                    required
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
-                    placeholder="your-org"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-sm text-slate-300">Repo name</span>
-                  <input
-                    name="repoName"
-                    required
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
-                    placeholder="frontend-repo"
-                  />
-                </label>
-              </div>
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-300">Figma file key</span>
+                <span className="mb-2 block text-sm text-slate-300">Figma URL</span>
                 <input
-                  name="figmaFileKey"
+                  name="figmaUrl"
                   required
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
-                  placeholder="ABCD1234EFGH"
+                  placeholder="https://www.figma.com/design/..."
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm text-slate-300">GitHub repo URL</span>
+                <input
+                  name="repoUrl"
+                  required
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
+                  placeholder="https://github.com/owner/repo"
                 />
               </label>
               <button
@@ -119,7 +124,7 @@ export default function Home() {
                         {project.repoOwner}/{project.repoName}
                       </p>
                       <p className="mt-1 text-sm text-slate-500">
-                        Figma key {project.figmaFileKey}
+                        Last checked via one-click review loop
                       </p>
                     </div>
                     <span className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.18em] text-slate-300">
@@ -156,7 +161,8 @@ export default function Home() {
                         {project.name}
                       </p>
                       <h3 className="mt-2 text-lg font-medium text-white">
-                        PR #{run.prNumber} · {run.prTitle}
+                        {run.prSelectionMode === "auto-latest" ? "Latest PR" : "Manual PR"} · #
+                        {run.prNumber} · {run.prTitle}
                       </h3>
                       <p className="mt-2 text-sm text-slate-300">
                         {run.summary.totalIssues} issues · {run.summary.high} high ·{" "}

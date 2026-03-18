@@ -73,7 +73,10 @@ export default async function AuditRunPage({
               PR #{auditRun.prNumber} · {auditRun.prTitle}
             </h1>
             <p className="mt-3 text-slate-300">
-              {projectDetails.project.name} · {formatDate(auditRun.createdAt)}
+              {projectDetails.project.name} · {formatDate(auditRun.createdAt)} ·{" "}
+              {auditRun.prSelectionMode === "auto-latest"
+                ? "auto-selected latest PR"
+                : "manually chosen PR"}
             </p>
           </div>
           <div className="flex gap-3">
@@ -99,13 +102,63 @@ export default async function AuditRunPage({
           <Stat label="Low severity" value={auditRun.summary.low} />
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[1.1fr_0.9fr]">
+        <Surface>
+          <div className="grid gap-4 md:grid-cols-3">
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Last synced from Figma</p>
+              <p className="mt-2 text-sm text-slate-200">
+                {projectDetails.latestSnapshot
+                  ? formatDate(projectDetails.latestSnapshot.createdAt)
+                  : "No snapshot"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Last checked PR</p>
+              <p className="mt-2 text-sm text-slate-200">
+                {auditRun.sourcePrUrl ? (
+                  <a href={auditRun.sourcePrUrl} className="underline decoration-white/20 underline-offset-4">
+                    {auditRun.sourcePrUrl}
+                  </a>
+                ) : (
+                  `#${auditRun.prNumber}`
+                )}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs uppercase tracking-[0.18em] text-slate-500">PR updated</p>
+              <p className="mt-2 text-sm text-slate-200">
+                {auditRun.sourcePrUpdatedAt ? formatDate(auditRun.sourcePrUpdatedAt) : "Unknown"}
+              </p>
+            </div>
+          </div>
+        </Surface>
+
+        <div className="grid gap-6 lg:grid-cols-[0.95fr_1.05fr]">
+          <Surface>
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">
+                  Fix brief
+                </p>
+                <h2 className="mt-2 text-2xl font-semibold text-white">
+                  Agent-ready remediation handoff
+                </h2>
+              </div>
+              <CopyButton value={fixBrief} />
+            </div>
+            <textarea
+              readOnly
+              value={fixBrief}
+              className="mt-6 min-h-[480px] w-full rounded-[28px] border border-white/10 bg-[#020817] px-4 py-4 font-mono text-sm text-slate-200 outline-none"
+            />
+          </Surface>
+
           <Surface>
             <p className="text-xs uppercase tracking-[0.22em] text-slate-400">
-              Review report
+              Drift evidence
             </p>
             <h2 className="mt-2 text-2xl font-semibold text-white">
-              Expected vs found drift evidence
+              Expected vs found implementation mismatches
             </h2>
             <div className="mt-6 space-y-6">
               {issues.length === 0 ? (
@@ -203,25 +256,6 @@ export default async function AuditRunPage({
                 </div>
               ))}
             </div>
-          </Surface>
-
-          <Surface>
-            <div className="flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-[0.22em] text-slate-400">
-                  Fix brief
-                </p>
-                <h2 className="mt-2 text-2xl font-semibold text-white">
-                  Agent-ready remediation export
-                </h2>
-              </div>
-              <CopyButton value={fixBrief} />
-            </div>
-            <textarea
-              readOnly
-              value={fixBrief}
-              className="mt-6 min-h-[480px] w-full rounded-[28px] border border-white/10 bg-[#020817] px-4 py-4 font-mono text-sm text-slate-200 outline-none"
-            />
           </Surface>
         </div>
       </div>

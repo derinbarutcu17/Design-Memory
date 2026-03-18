@@ -2,13 +2,15 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import {
+  checkLatestPullRequestAction,
   importReferenceAction,
   importSampleReferenceAction,
-  runAuditAction,
+  runAuditForSelectedPullRequestAction,
   syncFigmaReferenceAction,
   updateProjectAction,
 } from "@/app/actions";
 import { Surface } from "@/components/ui";
+import { listOpenPullRequests } from "@/lib/github";
 import { sampleReferenceSnapshot } from "@/lib/sample-reference";
 import { getProjectDetails } from "@/lib/store";
 import { formatDate, prettyJson } from "@/lib/utils";
@@ -26,6 +28,18 @@ export default async function ProjectPage({
   const resolvedSearchParams = searchParams ? await searchParams : undefined;
   const details = getProjectDetails(projectId);
   const hasFigmaToken = Boolean(process.env.FIGMA_ACCESS_TOKEN);
+  let openPullRequests: Awaited<ReturnType<typeof listOpenPullRequests>> = [];
+
+  if (details) {
+    try {
+      openPullRequests = await listOpenPullRequests(
+        details.project.repoOwner,
+        details.project.repoName,
+      );
+    } catch {
+      openPullRequests = [];
+    }
+  }
 
   if (!details) {
     notFound();
@@ -43,8 +57,7 @@ export default async function ProjectPage({
               {details.project.name}
             </h1>
             <p className="mt-3 text-slate-300">
-              {details.project.repoOwner}/{details.project.repoName} · Figma file key{" "}
-              {details.project.figmaFileKey}
+              {details.project.repoOwner}/{details.project.repoName} · Figma source connected
             </p>
           </div>
           <Link
@@ -73,33 +86,23 @@ export default async function ProjectPage({
               Repository settings
             </p>
             <h2 className="mt-2 text-2xl font-semibold text-white">
-              Keep the audit target current
+              Connection details
             </h2>
             <form action={updateProjectAction} className="mt-6 space-y-4">
               <input type="hidden" name="projectId" value={details.project.id} />
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="block">
-                  <span className="mb-2 block text-sm text-slate-300">Repo owner</span>
-                  <input
-                    name="repoOwner"
-                    defaultValue={details.project.repoOwner}
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
-                  />
-                </label>
-                <label className="block">
-                  <span className="mb-2 block text-sm text-slate-300">Repo name</span>
-                  <input
-                    name="repoName"
-                    defaultValue={details.project.repoName}
-                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
-                  />
-                </label>
-              </div>
               <label className="block">
-                <span className="mb-2 block text-sm text-slate-300">Figma file key</span>
+                <span className="mb-2 block text-sm text-slate-300">Figma URL</span>
                 <input
-                  name="figmaFileKey"
-                  defaultValue={details.project.figmaFileKey}
+                  name="figmaUrl"
+                  defaultValue={details.project.figmaUrl}
+                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-sm text-slate-300">GitHub repo URL</span>
+                <input
+                  name="repoUrl"
+                  defaultValue={details.project.repoUrl}
                   className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
                 />
               </label>
@@ -131,12 +134,15 @@ export default async function ProjectPage({
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
                   <p className="text-sm text-slate-300">
-                    File key <span className="font-mono text-white">{details.project.figmaFileKey}</span>
+                    Figma URL <span className="font-mono text-white">{details.project.figmaUrl}</span>
                   </p>
                   <p className="mt-1 text-sm text-slate-500">
                     {hasFigmaToken
                       ? "FIGMA_ACCESS_TOKEN detected. Ready for live sync."
                       : "FIGMA_ACCESS_TOKEN missing. Add it before running live Figma sync."}
+                  </p>
+                  <p className="mt-1 text-sm text-slate-500">
+                    Parsed file key <span className="font-mono">{details.project.figmaFileKey}</span>
                   </p>
                 </div>
                 <form action={syncFigmaReferenceAction}>
@@ -279,41 +285,91 @@ export default async function ProjectPage({
           </Surface>
 
           <Surface>
-            <p className="text-xs uppercase tracking-[0.22em] text-slate-400">
-              Run audit
-            </p>
+            <p className="text-xs uppercase tracking-[0.22em] text-slate-400">Review loop</p>
             <h2 className="mt-2 text-2xl font-semibold text-white">
-              Inspect a live GitHub pull request
+              Check the latest implementation
             </h2>
             <p className="mt-3 text-sm leading-7 text-slate-300">
-              This V1 uses your local authenticated <code className="rounded bg-white/10 px-1 py-0.5">gh</code>{" "}
-              session to fetch PR metadata, changed UI files, patches, and current file contents.
+              Design Memory will sync the latest Figma truth source, inspect the latest open
+              PR in the connected repo, and generate a Fix brief with supporting drift
+              evidence.
             </p>
-            <form action={runAuditAction} className="mt-6 flex flex-wrap items-end gap-4">
+            <form action={checkLatestPullRequestAction} className="mt-6 flex flex-wrap items-end gap-4">
               <input type="hidden" name="projectId" value={details.project.id} />
-              <label className="block max-w-[220px] flex-1">
-                <span className="mb-2 block text-sm text-slate-300">PR number</span>
-                <input
-                  name="prNumber"
-                  type="number"
-                  min={1}
-                  required
-                  disabled={!details.latestSnapshot}
-                  className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60 disabled:cursor-not-allowed disabled:opacity-50"
-                  placeholder="42"
-                />
-              </label>
               <button
                 type="submit"
-                disabled={!details.latestSnapshot}
+                disabled={!hasFigmaToken}
                 className="rounded-full bg-white px-5 py-3 font-medium text-slate-950 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Run PR audit
+                Check latest PR
               </button>
             </form>
+            <div className="mt-8 rounded-3xl border border-white/8 bg-white/[0.03] p-4">
+              <p className="text-sm uppercase tracking-[0.18em] text-slate-500">
+                Choose PR manually
+              </p>
+              <p className="mt-2 text-sm text-slate-300">
+                Use this when the latest PR is not the one you want or when the default PR has
+                no UI-related changes.
+              </p>
+              {openPullRequests.length > 0 ? (
+                <div className="mt-4 space-y-3">
+                  {openPullRequests.slice(0, 5).map((pullRequest) => (
+                    <form
+                      key={pullRequest.number}
+                      action={runAuditForSelectedPullRequestAction}
+                      className="rounded-2xl border border-white/8 bg-[#020817] p-4"
+                    >
+                      <input type="hidden" name="projectId" value={details.project.id} />
+                      <input type="hidden" name="prNumber" value={pullRequest.number} />
+                      <div className="flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                          <p className="text-sm font-medium text-white">
+                            #{pullRequest.number} · {pullRequest.title}
+                          </p>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Updated {formatDate(pullRequest.updatedAt)}
+                          </p>
+                        </div>
+                        <button
+                          type="submit"
+                          className="rounded-full border border-white/10 px-4 py-2 text-sm text-slate-100 transition hover:bg-white/5"
+                        >
+                          Analyze this PR
+                        </button>
+                      </div>
+                    </form>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 text-sm text-slate-500">
+                  No open PRs found or GitHub PR lookup is unavailable right now.
+                </p>
+              )}
+              <form action={runAuditForSelectedPullRequestAction} className="mt-4 flex flex-wrap items-end gap-4">
+                <input type="hidden" name="projectId" value={details.project.id} />
+                <label className="block max-w-[220px] flex-1">
+                  <span className="mb-2 block text-sm text-slate-300">PR number fallback</span>
+                  <input
+                    name="prNumber"
+                    type="number"
+                    min={1}
+                    required
+                    className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-white outline-none transition focus:border-sky-400/60"
+                    placeholder="42"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="rounded-full border border-white/10 bg-white px-5 py-3 font-medium text-slate-950 transition hover:bg-slate-100"
+                >
+                  Choose PR manually
+                </button>
+              </form>
+            </div>
             <div className="mt-8">
               <p className="text-sm uppercase tracking-[0.18em] text-slate-500">
-                Previous runs
+                Last checked PR
               </p>
               <div className="mt-4 space-y-3">
                 {details.auditRuns.length === 0 ? (
@@ -331,12 +387,18 @@ export default async function ProjectPage({
                       {formatDate(run.createdAt)}
                     </p>
                     <h3 className="mt-2 text-lg font-medium text-white">
-                      PR #{run.prNumber} · {run.prTitle}
+                      {run.prSelectionMode === "auto-latest" ? "Latest PR" : "Manual PR"} · #
+                      {run.prNumber} · {run.prTitle}
                     </h3>
                     <p className="mt-2 text-sm text-slate-300">
                       {run.summary.totalIssues} issues · {run.summary.high} high ·{" "}
                       {run.summary.medium} medium · {run.summary.low} low
                     </p>
+                    {run.sourcePrUpdatedAt ? (
+                      <p className="mt-1 text-sm text-slate-500">
+                        PR updated {formatDate(run.sourcePrUpdatedAt)}
+                      </p>
+                    ) : null}
                   </Link>
                 ))}
               </div>

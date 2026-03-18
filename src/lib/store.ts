@@ -15,16 +15,32 @@ function parseJson<T>(value: string | null): T | null {
   return value ? (JSON.parse(value) as T) : null;
 }
 
+function buildDerivedUrls(project: {
+  repo_owner: string;
+  repo_name: string;
+  figma_file_key: string;
+  repo_url?: string | null;
+  figma_url?: string | null;
+}) {
+  return {
+    repoUrl:
+      project.repo_url ?? `https://github.com/${project.repo_owner}/${project.repo_name}`,
+    figmaUrl: project.figma_url ?? `https://www.figma.com/design/${project.figma_file_key}`,
+  };
+}
+
 export function listProjects(): Project[] {
   const rows = db
     .prepare(
-      `SELECT id, name, repo_owner, repo_name, figma_file_key, created_at, updated_at
+      `SELECT id, name, figma_url, repo_url, repo_owner, repo_name, figma_file_key, created_at, updated_at
        FROM projects
        ORDER BY updated_at DESC`,
     )
     .all() as Array<{
     id: string;
     name: string;
+    figma_url: string | null;
+    repo_url: string | null;
     repo_owner: string;
     repo_name: string;
     figma_file_key: string;
@@ -35,6 +51,7 @@ export function listProjects(): Project[] {
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
+    ...buildDerivedUrls(row),
     repoOwner: row.repo_owner,
     repoName: row.repo_name,
     figmaFileKey: row.figma_file_key,
@@ -53,8 +70,8 @@ export function createProject(input: Omit<Project, "id" | "createdAt" | "updated
   };
 
   db.prepare(
-    `INSERT INTO projects (id, name, repo_owner, repo_name, figma_file_key, created_at, updated_at)
-     VALUES (@id, @name, @repoOwner, @repoName, @figmaFileKey, @createdAt, @updatedAt)`,
+    `INSERT INTO projects (id, name, figma_url, repo_url, repo_owner, repo_name, figma_file_key, created_at, updated_at)
+     VALUES (@id, @name, @figmaUrl, @repoUrl, @repoOwner, @repoName, @figmaFileKey, @createdAt, @updatedAt)`,
   ).run(project);
 
   return project;
@@ -62,11 +79,11 @@ export function createProject(input: Omit<Project, "id" | "createdAt" | "updated
 
 export function updateProject(
   projectId: string,
-  input: Pick<Project, "repoOwner" | "repoName" | "figmaFileKey">,
+  input: Pick<Project, "repoOwner" | "repoName" | "figmaFileKey" | "figmaUrl" | "repoUrl">,
 ) {
   db.prepare(
     `UPDATE projects
-     SET repo_owner = @repoOwner, repo_name = @repoName, figma_file_key = @figmaFileKey, updated_at = @updatedAt
+     SET figma_url = @figmaUrl, repo_url = @repoUrl, repo_owner = @repoOwner, repo_name = @repoName, figma_file_key = @figmaFileKey, updated_at = @updatedAt
      WHERE id = @projectId`,
   ).run({
     projectId,
@@ -152,7 +169,7 @@ export function getLatestSnapshot(projectId: string): ReferenceSnapshotRecord | 
 export function listAuditRuns(projectId: string): AuditRun[] {
   const rows = db
     .prepare(
-      `SELECT id, project_id, reference_snapshot_id, pr_number, pr_title, commit_sha, status, summary_json, comparison_json, created_at
+      `SELECT id, project_id, reference_snapshot_id, pr_number, pr_title, commit_sha, source_pr_url, source_pr_updated_at, pr_selection_mode, status, summary_json, comparison_json, created_at
        FROM audit_runs
        WHERE project_id = ?
        ORDER BY created_at DESC`,
@@ -164,6 +181,9 @@ export function listAuditRuns(projectId: string): AuditRun[] {
     pr_number: number;
     pr_title: string;
     commit_sha: string;
+    source_pr_url: string | null;
+    source_pr_updated_at: string | null;
+    pr_selection_mode: "auto-latest" | "manual" | null;
     status: "completed" | "failed";
     summary_json: string;
     comparison_json: string | null;
@@ -177,6 +197,9 @@ export function listAuditRuns(projectId: string): AuditRun[] {
     prNumber: row.pr_number,
     prTitle: row.pr_title,
     commitSha: row.commit_sha,
+    sourcePrUrl: row.source_pr_url ?? undefined,
+    sourcePrUpdatedAt: row.source_pr_updated_at ?? undefined,
+    prSelectionMode: row.pr_selection_mode ?? undefined,
     status: row.status,
     summary: JSON.parse(row.summary_json) as AuditRun["summary"],
     comparison: parseJson<AuditRun["comparison"]>(row.comparison_json) ?? undefined,
@@ -191,7 +214,7 @@ export function getAuditRun(auditRunId: string) {
 function listAllAuditRuns() {
   const rows = db
     .prepare(
-      `SELECT id, project_id, reference_snapshot_id, pr_number, pr_title, commit_sha, status, summary_json, comparison_json, created_at
+      `SELECT id, project_id, reference_snapshot_id, pr_number, pr_title, commit_sha, source_pr_url, source_pr_updated_at, pr_selection_mode, status, summary_json, comparison_json, created_at
        FROM audit_runs
        ORDER BY created_at DESC`,
     )
@@ -202,6 +225,9 @@ function listAllAuditRuns() {
     pr_number: number;
     pr_title: string;
     commit_sha: string;
+    source_pr_url: string | null;
+    source_pr_updated_at: string | null;
+    pr_selection_mode: "auto-latest" | "manual" | null;
     status: "completed" | "failed";
     summary_json: string;
     comparison_json: string | null;
@@ -215,6 +241,9 @@ function listAllAuditRuns() {
     prNumber: row.pr_number,
     prTitle: row.pr_title,
     commitSha: row.commit_sha,
+    sourcePrUrl: row.source_pr_url ?? undefined,
+    sourcePrUpdatedAt: row.source_pr_updated_at ?? undefined,
+    prSelectionMode: row.pr_selection_mode ?? undefined,
     status: row.status,
     summary: JSON.parse(row.summary_json) as AuditRun["summary"],
     comparison: parseJson<AuditRun["comparison"]>(row.comparison_json) ?? undefined,
@@ -234,8 +263,8 @@ export function createAuditRun(
   };
 
   const insertAudit = db.prepare(
-    `INSERT INTO audit_runs (id, project_id, reference_snapshot_id, pr_number, pr_title, commit_sha, status, summary_json, comparison_json, created_at)
-     VALUES (@id, @projectId, @referenceSnapshotId, @prNumber, @prTitle, @commitSha, @status, @summaryJson, @comparisonJson, @createdAt)`,
+    `INSERT INTO audit_runs (id, project_id, reference_snapshot_id, pr_number, pr_title, commit_sha, source_pr_url, source_pr_updated_at, pr_selection_mode, status, summary_json, comparison_json, created_at)
+     VALUES (@id, @projectId, @referenceSnapshotId, @prNumber, @prTitle, @commitSha, @sourcePrUrl, @sourcePrUpdatedAt, @prSelectionMode, @status, @summaryJson, @comparisonJson, @createdAt)`,
   );
 
   const insertIssue = db.prepare(

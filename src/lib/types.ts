@@ -5,6 +5,8 @@ export type ReviewStatus = "valid" | "intentional" | "ignore";
 export type Project = {
   id: string;
   name: string;
+  figmaUrl?: string;
+  repoUrl?: string;
   repoOwner: string;
   repoName: string;
   figmaFileKey: string;
@@ -88,6 +90,9 @@ export type AuditRun = {
   prNumber: number;
   prTitle: string;
   commitSha: string;
+  sourcePrUrl?: string;
+  sourcePrUpdatedAt?: string;
+  prSelectionMode?: "auto-latest" | "manual";
   status: "completed" | "failed";
   summary: AuditSummary;
   comparison?: {
@@ -151,5 +156,14 @@ export type PullRequestDetails = {
   title: string;
   headSha: string;
   url: string;
+  updatedAt?: string;
   files: PullRequestFile[];
+};
+
+export type PullRequestSummary = {
+  number: number;
+  title: string;
+  url: string;
+  updatedAt: string;
+  authorLogin?: string;
 };

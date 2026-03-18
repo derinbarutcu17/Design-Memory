@@ -13,6 +13,8 @@ function ensureDatabase() {
     CREATE TABLE IF NOT EXISTS projects (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
+      figma_url TEXT,
+      repo_url TEXT,
       repo_owner TEXT NOT NULL,
       repo_name TEXT NOT NULL,
       figma_file_key TEXT NOT NULL,
@@ -36,6 +38,9 @@ function ensureDatabase() {
       pr_number INTEGER NOT NULL,
       pr_title TEXT NOT NULL,
       commit_sha TEXT NOT NULL,
+      source_pr_url TEXT,
+      source_pr_updated_at TEXT,
+      pr_selection_mode TEXT,
       status TEXT NOT NULL,
       summary_json TEXT NOT NULL,
       comparison_json TEXT,
@@ -67,6 +72,22 @@ function ensureDatabase() {
       updated_at TEXT NOT NULL
     );
   `);
+
+  const ensureColumn = (table: string, column: string, definition: string) => {
+    const columns = db
+      .prepare(`PRAGMA table_info(${table})`)
+      .all() as Array<{ name: string }>;
+
+    if (!columns.some((entry) => entry.name === column)) {
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+    }
+  };
+
+  ensureColumn("projects", "figma_url", "TEXT");
+  ensureColumn("projects", "repo_url", "TEXT");
+  ensureColumn("audit_runs", "source_pr_url", "TEXT");
+  ensureColumn("audit_runs", "source_pr_updated_at", "TEXT");
+  ensureColumn("audit_runs", "pr_selection_mode", "TEXT");
 
   return db;
 }

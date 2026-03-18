@@ -5,7 +5,10 @@ import { redirect } from "next/navigation";
 
 import { analyzeDrift } from "@/lib/audit";
 import { syncReferenceSnapshotFromFigma } from "@/lib/figma/normalize-reference";
-import { fetchPullRequest } from "@/lib/github";
+import {
+  fetchLatestOpenPullRequest,
+  fetchPullRequest,
+} from "@/lib/github";
 import { createProjectSchema, referenceSnapshotSchema } from "@/lib/schema";
 import { sampleReferenceSnapshot } from "@/lib/sample-reference";
 import {
@@ -14,7 +17,6 @@ import {
   createProject,
   createReferenceSnapshot,
   getAuditRun,
-  getLatestSnapshot,
   getProjectDetails,
   listAuditRuns,
   listIssuesForAuditRun,
@@ -23,7 +25,12 @@ import {
   updateProject,
 } from "@/lib/store";
 import type { ReviewStatus } from "@/lib/types";
-import { makeId } from "@/lib/utils";
+import { makeId, parseFigmaUrl, parseGitHubRepoUrl } from "@/lib/utils";
+
+function homeMessageRedirect(status: "success" | "error", message: string) {
+  const query = new URLSearchParams({ status, message });
+  redirect(`/?${query.toString()}`);
+}
 
 function projectMessageRedirect(projectId: string, status: "success" | "error", message: string) {
   const query = new URLSearchParams({ status, message });
@@ -31,28 +38,52 @@ function projectMessageRedirect(projectId: string, status: "success" | "error", 
 }
 
 export async function createProjectAction(formData: FormData) {
-  const parsed = createProjectSchema.parse({
-    name: formData.get("name"),
-    repoOwner: formData.get("repoOwner"),
-    repoName: formData.get("repoName"),
-    figmaFileKey: formData.get("figmaFileKey"),
-  });
+  try {
+    const parsed = createProjectSchema.parse({
+      name: formData.get("name"),
+      figmaUrl: formData.get("figmaUrl"),
+      repoUrl: formData.get("repoUrl"),
+    });
+    const { figmaFileKey } = parseFigmaUrl(parsed.figmaUrl);
+    const { owner, repo } = parseGitHubRepoUrl(parsed.repoUrl);
 
-  const project = createProject(parsed);
-  revalidatePath("/");
-  redirect(`/projects/${project.id}`);
+    const project = createProject({
+      name: parsed.name,
+      figmaUrl: parsed.figmaUrl,
+      repoUrl: parsed.repoUrl,
+      figmaFileKey,
+      repoOwner: owner,
+      repoName: repo,
+    });
+    revalidatePath("/");
+    redirect(`/projects/${project.id}`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Project creation failed.";
+    homeMessageRedirect("error", message);
+  }
 }
 
 export async function updateProjectAction(formData: FormData) {
   const projectId = String(formData.get("projectId"));
-  const parsed = createProjectSchema.omit({ name: true }).parse({
-    repoOwner: formData.get("repoOwner"),
-    repoName: formData.get("repoName"),
-    figmaFileKey: formData.get("figmaFileKey"),
-  });
+  try {
+    const rawFigmaUrl = String(formData.get("figmaUrl"));
+    const rawRepoUrl = String(formData.get("repoUrl"));
+    const { figmaFileKey } = parseFigmaUrl(rawFigmaUrl);
+    const { owner, repo } = parseGitHubRepoUrl(rawRepoUrl);
 
-  updateProject(projectId, parsed);
-  revalidatePath(`/projects/${projectId}`);
+    updateProject(projectId, {
+      figmaUrl: rawFigmaUrl,
+      repoUrl: rawRepoUrl,
+      figmaFileKey,
+      repoOwner: owner,
+      repoName: repo,
+    });
+    revalidatePath(`/projects/${projectId}`);
+    projectMessageRedirect(projectId, "success", "Connection details updated.");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Connection update failed.";
+    projectMessageRedirect(projectId, "error", message);
+  }
 }
 
 export async function importReferenceAction(formData: FormData) {
@@ -99,22 +130,25 @@ export async function syncFigmaReferenceAction(formData: FormData) {
   }
 }
 
-export async function runAuditAction(formData: FormData) {
-  const projectId = String(formData.get("projectId"));
-  const prNumber = Number(formData.get("prNumber"));
+async function runAuditForPullRequest(
+  projectId: string,
+  prNumber: number,
+  prSelectionMode: "auto-latest" | "manual",
+) {
   const details = getProjectDetails(projectId);
 
   if (!details) {
     throw new Error("Project not found.");
   }
 
-  const latestSnapshot = getLatestSnapshot(projectId);
+  const snapshot = await syncReferenceSnapshotFromFigma(details.project.figmaFileKey);
+  const latestSnapshot = createReferenceSnapshot(projectId, snapshot);
+  const pr = await fetchPullRequest(details.project.repoOwner, details.project.repoName, prNumber);
 
-  if (!latestSnapshot) {
-    throw new Error("Import a Figma reference before running an audit.");
+  if (pr.files.length === 0) {
+    throw new Error("No UI-related changes found in that pull request.");
   }
 
-  const pr = await fetchPullRequest(details.project.repoOwner, details.project.repoName, prNumber);
   const previousRun = listAuditRuns(projectId)[0];
   const previousIssues = previousRun ? listIssuesForAuditRun(previousRun.id) : [];
   const previousReviews = previousRun
@@ -143,6 +177,9 @@ export async function runAuditAction(formData: FormData) {
       prNumber,
       prTitle: pr.title,
       commitSha: pr.headSha,
+      sourcePrUrl: pr.url,
+      sourcePrUpdatedAt: pr.updatedAt,
+      prSelectionMode,
       status: "completed",
       summary: analysis.summary,
       comparison: analysis.comparison,
@@ -153,6 +190,52 @@ export async function runAuditAction(formData: FormData) {
 
   revalidatePath(`/projects/${projectId}`);
   redirect(`/audits/${run.id}`);
+}
+
+export async function checkLatestPullRequestAction(formData: FormData) {
+  const projectId = String(formData.get("projectId"));
+  const details = getProjectDetails(projectId);
+
+  if (!details) {
+    throw new Error("Project not found.");
+  }
+
+  try {
+    const latestOpenPr = await fetchLatestOpenPullRequest(
+      details.project.repoOwner,
+      details.project.repoName,
+    );
+
+    if (!latestOpenPr) {
+      projectMessageRedirect(
+        projectId,
+        "error",
+        "No open PRs found. Choose a PR manually to keep going.",
+      );
+    }
+
+    await runAuditForPullRequest(projectId, latestOpenPr.number, "auto-latest");
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Could not check the latest pull request.";
+    projectMessageRedirect(projectId, "error", message);
+  }
+}
+
+export async function runAuditForSelectedPullRequestAction(formData: FormData) {
+  const projectId = String(formData.get("projectId"));
+  const prNumber = Number(formData.get("prNumber"));
+
+  try {
+    await runAuditForPullRequest(projectId, prNumber, "manual");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not run the selected PR.";
+    projectMessageRedirect(projectId, "error", message);
+  }
+}
+
+export async function runAuditAction(formData: FormData) {
+  return runAuditForSelectedPullRequestAction(formData);
 }
 
 export async function reviewIssueAction(formData: FormData) {

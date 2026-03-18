@@ -75,3 +75,40 @@ export function hashParts(parts: string[]) {
 export function prettyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
 }
+
+export function parseFigmaUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const designIndex = parts.findIndex((part) => part === "design" || part === "file");
+    const figmaFileKey = designIndex >= 0 ? parts[designIndex + 1] : undefined;
+
+    if (!figmaFileKey) {
+      throw new Error("Could not find a Figma file key in that URL.");
+    }
+
+    return { figmaFileKey };
+  } catch {
+    throw new Error("Enter a valid Figma file URL.");
+  }
+}
+
+export function parseGitHubRepoUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+    const parts = parsed.pathname.split("/").filter(Boolean);
+    const owner = parts[0];
+    const repo = parts[1];
+
+    if (!owner || !repo) {
+      throw new Error("Missing owner or repo.");
+    }
+
+    return {
+      owner,
+      repo: repo.replace(/\.git$/, ""),
+    };
+  } catch {
+    throw new Error("Enter a valid GitHub repository URL.");
+  }
+}

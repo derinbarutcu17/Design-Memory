@@ -1,26 +1,25 @@
 # Design Memory
 
-Design Memory is a Figma-first design-to-code drift review workflow.
+Design Memory is a local-first Figma-to-PR review loop for AI-assisted implementation.
 
-Phase 2 makes the product genuinely Figma-backed:
+The product story is now:
 
-- projects store a real `figmaFileKey`
-- the project page can now sync directly from the Figma API
-- synced Figma data is normalized into the existing internal reference snapshot format
-- GitHub PR audits still run locally through `gh api`
-- review, fix brief export, and rerun comparison all stay deterministic
+1. Connect a Figma URL once.
+2. Connect a GitHub repo URL once.
+3. Click `Check latest PR`.
+4. Design Memory syncs Figma, inspects the latest open PR, and generates a **Fix brief**.
+5. Review the supporting **Drift evidence**.
+6. Paste the Fix brief into your coding agent.
+7. Recheck after fixes.
 
-Manual JSON import still exists, but only as a fallback/debug path.
+## What changed in this update
 
-## Current workflow
-
-1. Create a project with GitHub repo details and a Figma file key.
-2. Click `Sync from Figma` on the project page.
-3. Design Memory fetches the file from Figma and stores a new source-of-truth snapshot.
-4. Run a GitHub PR audit.
-5. Review the detected drift issues.
-6. Copy the generated fix brief into your coding agent.
-7. Re-run after fixes and compare the issue count.
+- setup now uses `Figma URL` and `GitHub repo URL`
+- raw file key and repo owner/name are derived internally
+- `Check latest PR` is the primary action
+- `Choose PR manually` is the fallback path
+- `Fix brief` is now the main output
+- audit runs store whether the PR was auto-selected or manually chosen
 
 ## Stack
 
@@ -31,141 +30,180 @@ Manual JSON import still exists, but only as a fallback/debug path.
 - GitHub access via local `gh api`
 - Figma sync via the Figma REST API
 
-## Environment variables
+## Required local setup
 
-Create a `.env.local` file in the project root:
+Create `.env.local` in the project root:
 
 ```bash
 FIGMA_ACCESS_TOKEN=your_figma_personal_access_token
 ```
 
-GitHub auth is still provided by your local GitHub CLI login:
+GitHub access still comes from your local CLI session:
 
 ```bash
 gh auth status
 ```
 
-## Local setup
+Then run:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open the local URL shown in the terminal.
 
-## Figma sync behavior
+## Current workflow
 
-The primary path is now live Figma sync.
+### Normal path
 
-When you click `Sync from Figma`, the app:
+1. Create a project with:
+   - a project name
+   - a Figma URL
+   - a GitHub repo URL
+2. Open the project.
+3. Click `Check latest PR`.
+4. The app will:
+   - sync the latest Figma reference
+   - find the latest updated open PR
+   - inspect UI-related changed files
+   - create an audit
+   - open the audit page with the **Fix brief** first
 
-- uses the project’s saved `figmaFileKey`
-- calls the Figma REST API with `FIGMA_ACCESS_TOKEN`
-- fetches file data and local variables where available
-- normalizes components, variants, states, styles, and token-like references
-- stores a new reference snapshot in SQLite
+### Fallback path
 
-Normalization is intentionally conservative:
+If the latest PR is not suitable:
 
-- it extracts what can be derived clearly
-- it leaves uncertain fields empty instead of inventing precision
-- it improves `codeMatches`, `aliases`, `tokensUsed`, and token hints for deterministic audits
+- click `Choose PR manually`
+- pick one of the recent open PRs
+- or enter a PR number fallback
 
-## Manual import fallback
+### Figma fallback/debug path
 
-Manual JSON import is still available on the project page for:
+Manual normalized JSON import still exists under the fallback import section for:
 
 - debugging normalization
-- loading prepared reference payloads
-- working around temporary Figma API issues
+- loading prepared snapshots
+- temporary Figma API workarounds
 
-It is no longer the primary story.
+It is not the main product path.
 
-## Supported drift checks
+## Error handling behavior
 
-- `token-mismatch`
-- `hardcoded-style`
-- `variant-drift`
-- `missing-state`
-- `component-reuse` as a low-confidence heuristic only
+- Invalid Figma URL: project creation/update is blocked with a clear message
+- Invalid GitHub repo URL: project creation/update is blocked with a clear message
+- Missing `FIGMA_ACCESS_TOKEN`: Figma sync is blocked
+- No open PRs found: user is prompted to choose a PR manually
+- Latest PR has no UI-related changes: user is prompted to choose a PR manually
+- Figma sync failure: audit does not run against stale state
+
+## What the app stores
+
+Projects store:
+
+- `figmaUrl`
+- `repoUrl`
+- derived `figmaFileKey`
+- derived `repoOwner` and `repoName`
+
+Audit runs store:
+
+- PR number and title
+- PR URL
+- PR updated time
+- whether the PR was `auto-latest` or `manual`
 
 ## What is intentionally deferred
 
+- webhooks
+- GitHub Actions
+- background polling
 - Figma plugin UI
 - OAuth or multi-user auth
 - screenshot diffing
 - AI-generated recommendations
-- autonomous code fixes
-- GitHub Actions or background jobs
+- autonomous code fixing
 - VS Code integration
-- MCP server packaging
+- MCP packaging
 
-## Simple demo instructions for a complete beginner
+## Beginner demo instructions
 
-### What you need first
+### 1. Get your Figma URL
 
-You need:
+- Open your Figma file in the browser
+- Copy the full URL from the address bar
 
-- a GitHub repo with a pull request
-- a Figma file
-- a Figma personal access token
-
-### How to get a Figma personal access token
-
-1. Log into Figma in your browser.
-2. Open Figma account settings.
-3. Find the personal access token section.
-4. Create a new token.
-5. Copy it.
-6. Put it into `.env.local` like this:
-
-```bash
-FIGMA_ACCESS_TOKEN=paste_your_token_here
-```
-
-### How to get the Figma file key
-
-1. Open your Figma file in the browser.
-2. Look at the URL.
-3. It will look something like:
+Example:
 
 ```text
-https://www.figma.com/design/FILE_KEY/your-file-name
+https://www.figma.com/design/ABC123456789/My-Design
 ```
 
-4. Copy the `FILE_KEY` part.
+### 2. Get your GitHub repo URL
 
-### How to run the demo
+- Open the GitHub repo in your browser
+- Copy the full repo URL
 
-1. Start the app:
+Example:
+
+```text
+https://github.com/owner/repo
+```
+
+### 3. Start the app
 
 ```bash
 cd /Users/derin/Desktop/CODING/design-memory
 npm run dev
 ```
 
-2. Open [http://localhost:3000](http://localhost:3000)
-3. Create a project.
-4. Fill in:
-   - project name
-   - GitHub repo owner
-   - GitHub repo name
-   - Figma file key
-5. On the project page, click `Sync from Figma`.
-6. Wait for the success message.
-7. Enter a PR number and click `Run PR audit`.
-8. Open the audit report.
-9. Mark issues as `valid`, `intentional`, or `ignore`.
-10. Click `Copy brief`.
-11. Paste that brief into your coding agent.
-12. After the code is fixed, rerun the audit and open `Comparison`.
+### 4. Create a project
 
-### Best demo setup
+Fill in:
 
-For the easiest believable demo:
+- Project name
+- Figma URL
+- GitHub repo URL
+
+### 5. Run the one-click flow
+
+- Open the project
+- Click `Check latest PR`
+
+If everything is connected correctly, the app will:
+
+- sync from Figma
+- inspect the latest open PR
+- show a **Fix brief**
+
+### 6. Review the result
+
+On the audit page:
+
+- read the **Fix brief**
+- inspect the **Drift evidence**
+- mark issues as `valid`, `intentional`, or `ignore`
+
+### 7. Use it with your coding agent
+
+- click `Copy brief`
+- paste the brief into your coding agent
+- let the coding agent fix the implementation
+
+### 8. Recheck
+
+- return to the project
+- click `Check latest PR` again
+- open `Comparison` to see what improved
+
+## Best demo setup
+
+For the cleanest demo:
 
 - use a React/Next/Tailwind repo
-- use a PR that changes a shared component
-- choose a Figma file that clearly contains components like Button, Input, or Card
-- use a PR with obvious drift like hardcoded colors, missing hover/focus states, or a custom variant
+- use a PR that changes shared UI components
+- use a Figma file with named components like Button, Input, Card
+- choose a PR with visible drift such as:
+  - hardcoded colors
+  - missing focus/hover/disabled states
+  - custom variants that do not match Figma
