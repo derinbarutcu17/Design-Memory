@@ -141,7 +141,7 @@ export default async function AuditRunPage({
                   Fix brief
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold text-white">
-                  Agent-ready remediation handoff
+                  Agent-ready task spec
                 </h2>
               </div>
               <CopyButton value={fixBrief} />

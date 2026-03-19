@@ -133,6 +133,14 @@ function hasStyleSignals(text: string) {
   return /className|style=\{\{|bg-|text-|border-|rounded-|px-|py-|shadow-|ring-/.test(text);
 }
 
+function severityRank(severity: DriftIssue["severity"]) {
+  return severity === "high" ? 0 : severity === "medium" ? 1 : 2;
+}
+
+function summarizeIssue(issue: DriftIssue) {
+  return `${issue.issueType} in ${issue.filePath}: expected ${issue.expected}; found ${issue.found}.`;
+}
+
 export function generateFixBrief(
   pr: PullRequestDetails,
   issues: DriftIssue[],
@@ -143,46 +151,90 @@ export function generateFixBrief(
     return status !== "intentional" && status !== "ignore";
   });
 
-  const components = [...new Set(activeIssues.map((issue) => issue.componentName))];
-  const files = [...new Set(activeIssues.map((issue) => issue.filePath))];
-  const grouped = activeIssues.reduce<Record<string, DriftIssue[]>>((acc, issue) => {
+  const sortedIssues = [...activeIssues].sort((a, b) => {
+    const severityDiff = severityRank(a.severity) - severityRank(b.severity);
+    if (severityDiff !== 0) return severityDiff;
+    const confidenceDiff = b.confidence - a.confidence;
+    if (confidenceDiff !== 0) return confidenceDiff;
+    return a.filePath.localeCompare(b.filePath) || a.componentName.localeCompare(b.componentName);
+  });
+
+  const components = [...new Set(sortedIssues.map((issue) => issue.componentName))];
+  const files = [...new Set(sortedIssues.map((issue) => issue.filePath))];
+  const byComponent = sortedIssues.reduce<Record<string, DriftIssue[]>>((acc, issue) => {
     acc[issue.componentName] ??= [];
     acc[issue.componentName].push(issue);
     return acc;
   }, {});
+  const byType = sortedIssues.reduce<Record<string, number>>((acc, issue) => {
+    acc[issue.issueType] = (acc[issue.issueType] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const topActions = sortedIssues.slice(0, 6).map((issue) => {
+    return `- ${issue.componentName} (${issue.severity}): ${issue.suggestedAction}`;
+  });
+
+  const fileMap = files
+    .map((filePath) => {
+      const related = sortedIssues.filter((issue) => issue.filePath === filePath);
+      return `- ${filePath} (${related.length} issue${related.length === 1 ? "" : "s"})`;
+    })
+    .join("\n");
+
+  const componentBlocks = components
+    .map((componentName) => {
+      const componentIssues = byComponent[componentName] ?? [];
+      const issueLines = componentIssues
+        .map(
+          (issue, index) =>
+            `  ${index + 1}. ${summarizeIssue(issue)} Action: ${issue.suggestedAction} Evidence: ${issue.evidenceSnippet}`,
+        )
+        .join("\n");
+
+      return [
+        `- ${componentName}`,
+        componentIssues.length ? issueLines : `  No active issues.`,
+      ].join("\n");
+    })
+    .join("\n\n");
 
   const sections = [
-    `1. PR context`,
+    `FIX BRIEF`,
     `PR #${pr.number}: ${pr.title}`,
+    `Source: ${pr.url}`,
     ``,
-    `2. Affected components`,
-    components.length ? components.join(", ") : "No actionable components selected.",
+    `What this is`,
+    `Use this as the implementation task list for a coding agent. Fix the highest-priority drift first, keep design tokens and shared components intact, and do not invent new UI patterns unless the Figma reference requires them.`,
     ``,
-    `3. Issue summary`,
-    `${activeIssues.length} actionable drift issue(s) across ${files.length} file(s).`,
+    `Priority`,
+    `- High severity: ${sortedIssues.filter((issue) => issue.severity === "high").length}`,
+    `- Medium severity: ${sortedIssues.filter((issue) => issue.severity === "medium").length}`,
+    `- Low severity: ${sortedIssues.filter((issue) => issue.severity === "low").length}`,
     ``,
-    `4. Exact expected vs found problems`,
+    `Issue types`,
+    Object.entries(byType)
+      .map(([type, count]) => `- ${type}: ${count}`)
+      .join("\n") || `- none`,
+    ``,
+    `Affected components`,
+    components.length ? components.join(", ") : `None`,
+    ``,
+    `Affected files`,
+    fileMap || `None`,
+    ``,
+    `Do these first`,
+    topActions.length ? topActions.join("\n") : `- No active issues.`,
+    ``,
+    `Component-by-component notes`,
+    componentBlocks || `None`,
+    ``,
+    `Expected outcome`,
+    `- Shared tokens stay shared.`,
+    `- Approved variants and states match the design reference.`,
+    `- Raw hardcoded styling is replaced where the design system already has a primitive.`,
+    `- The PR becomes a clean yes/no pass instead of a maybe.`,
   ];
-
-  for (const [componentName, componentIssues] of Object.entries(grouped)) {
-    sections.push(`- ${componentName}`);
-    for (const issue of componentIssues) {
-      sections.push(
-        `  • ${issue.issueType} in ${issue.filePath}: expected ${issue.expected}; found ${issue.found}.`,
-      );
-    }
-  }
-
-  sections.push(
-    ``,
-    `5. Recommended fixes in priority order`,
-    `- Fix high-severity token and hardcoded-style issues first.`,
-    `- Restore missing states before introducing new variants.`,
-    `- Align custom variants with the approved Figma names and patterns.`,
-    ``,
-    `6. Preserve intended design system behavior`,
-    `Keep shared tokens, allowed variants, and required states aligned with the imported Figma reference.`,
-  );
 
   return sections.join("\n");
 }
