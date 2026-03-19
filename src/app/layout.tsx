@@ -21,7 +21,7 @@ const plexMono = IBM_Plex_Mono({
 export const metadata: Metadata = {
   title: "Design Memory",
   description:
-    "A Figma-first design-to-code drift review workflow for GitHub pull requests.",
+    "A local-first design-to-code audit tool for GitHub pull requests.",
 };
 
 export default function RootLayout({

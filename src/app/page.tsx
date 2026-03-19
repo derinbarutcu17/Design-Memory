@@ -114,7 +114,7 @@ export default async function Home({
             </div>
           </div>
           <p className="text-xs font-medium tracking-[0.18em] text-slate-500 uppercase">
-            Figma truth → PR check → Fix brief
+            Design reference → PR audit → Fix brief
           </p>
         </header>
 
@@ -139,8 +139,8 @@ export default async function Home({
                     Design <span className="text-[#89ceff]/85">Memory</span>
                   </h2>
                   <p className="max-w-2xl text-lg font-light leading-relaxed text-slate-400">
-                    Sync the approved design truth from Figma, inspect the latest
-                    implementation PR, and hand a clean fix brief back to the coding agent.
+                    Sync the Figma reference, inspect the latest implementation PR, and hand
+                    back a clean Fix brief.
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-3 pt-2">
@@ -170,14 +170,13 @@ export default async function Home({
                     Recent Audit Runs
                   </h3>
                   <span className="text-xs font-medium text-[#89ceff]">
-                    One-click checks only
+                    Latest PR by default
                   </span>
                 </div>
                 <div className="space-y-3">
                   {auditRuns.length === 0 ? (
                     <div className="rounded-xl border border-white/[0.06] bg-[#111419] p-5 text-sm text-slate-400">
-                      Audit runs will show up here after the first project checks a pull
-                      request.
+                      Audit runs show up here after the first PR check.
                     </div>
                   ) : null}
                   {auditRuns.map(({ project, run }) => (
@@ -234,7 +233,7 @@ export default async function Home({
                             {project.repoOwner}/{project.repoName}
                           </p>
                           <p className="mt-1 text-xs text-slate-600">
-                            Figma connected via URL · Fix brief workflow enabled
+                            Figma connected via URL · audit workflow enabled
                           </p>
                         </div>
                         <span className="rounded-full border border-white/[0.06] px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-300">
@@ -257,7 +256,7 @@ export default async function Home({
                     Create Project
                   </h3>
                   <p className="text-xs font-light text-slate-500">
-                    Connect your source-of-truth design and implementation repo.
+                    Connect your design reference and implementation repo.
                   </p>
                 </div>
 

@@ -122,7 +122,7 @@ export default async function ProjectPage({
                   Figma reference
                 </p>
                 <h2 className="mt-2 text-2xl font-semibold text-white">
-                  Sync the design source of truth from Figma
+                  Sync the design reference from Figma
                 </h2>
                 <p className="mt-3 max-w-xl text-sm leading-7 text-slate-300">
                   Normal workflow: use the saved Figma file key and sync straight from the
@@ -183,7 +183,7 @@ export default async function ProjectPage({
               <input type="hidden" name="projectId" value={details.project.id} />
               <label className="block">
                 <span className="mb-2 block text-sm text-slate-300">
-                  Paste normalized Figma-derived reference JSON
+                  Paste normalized reference JSON
                 </span>
                 <textarea
                   name="referenceJson"

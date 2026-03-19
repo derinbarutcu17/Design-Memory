@@ -1,8 +1,10 @@
 # Design Memory
 
-Design Memory is a local-first tool that compares a Figma design reference against the latest GitHub pull request and points out drift.
+Design Memory is a local-first design-to-code audit tool.
 
-It helps you answer one question fast:
+It compares a Figma design reference against a GitHub pull request and points out where the implementation drifted.
+
+It answers one question fast:
 Is the implementation still matching the design?
 
 ## Workflow
