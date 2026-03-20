@@ -1,3 +1,5 @@
+import * as ts from "typescript";
+
 import { generateNameCandidates, hashParts, makeId, normalizeForMatch, uniqueStrings } from "@/lib/utils";
 import type {
   AuditRun,
@@ -20,6 +22,391 @@ type PreviousIssueState = {
   reviews: Array<{ fingerprint: string; status: ReviewStatus }>;
   runId?: string;
 };
+
+type SourceSignals = {
+  sourceText: string;
+  jsxTagNames: string[];
+  importNames: string[];
+  classTokens: string[];
+  styleTokens: string[];
+  stateSignals: string[];
+  responsiveSignals: string[];
+  variantSignals: string[];
+  hasInlineStyle: boolean;
+};
+
+const INTERACTION_STATE_NAMES = ["hover", "focus", "focus-visible", "disabled", "active", "pressed", "selected", "loading"];
+const RESPONSIVE_PREFIXES = ["sm", "md", "lg", "xl", "2xl", "container"];
+const VARIANT_ATTR_NAMES = new Set(["variant", "tone", "size", "intent", "appearance", "mode", "state", "color"]);
+
+function emptySourceSignals(sourceText: string): SourceSignals {
+  return {
+    sourceText,
+    jsxTagNames: [],
+    importNames: [],
+    classTokens: [],
+    styleTokens: [],
+    stateSignals: [],
+    responsiveSignals: [],
+    variantSignals: [],
+    hasInlineStyle: false,
+  };
+}
+
+function getJsxTagName(tagName: ts.JsxTagNameExpression) {
+  return tagName.getText();
+}
+
+function getAttributeName(name: ts.PropertyName | ts.JsxAttributeName) {
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNoSubstitutionTemplateLiteral(name)) {
+    return name.text;
+  }
+
+  if (ts.isJsxNamespacedName(name)) {
+    return `${name.namespace.text}:${name.name.text}`;
+  }
+
+  return name.getText();
+}
+
+function pushUnique(target: string[], values: string[]) {
+  target.push(...values.filter(Boolean));
+}
+
+function splitClassTokens(value: string) {
+  return value
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
+function collectStringFragments(node: ts.Node | undefined, bucket: string[]) {
+  if (!node) {
+    return;
+  }
+
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    bucket.push(node.text);
+    return;
+  }
+
+  if (ts.isTemplateExpression(node)) {
+    bucket.push(node.head.text);
+    for (const span of node.templateSpans) {
+      bucket.push(span.literal.text);
+      collectStringFragments(span.expression, bucket);
+    }
+    return;
+  }
+
+  if (ts.isBinaryExpression(node)) {
+    collectStringFragments(node.left, bucket);
+    collectStringFragments(node.right, bucket);
+    return;
+  }
+
+  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)) {
+    collectStringFragments(node.expression, bucket);
+    return;
+  }
+
+  if (ts.isConditionalExpression(node)) {
+    collectStringFragments(node.whenTrue, bucket);
+    collectStringFragments(node.whenFalse, bucket);
+    return;
+  }
+
+  if (ts.isArrayLiteralExpression(node)) {
+    for (const element of node.elements) {
+      collectStringFragments(element, bucket);
+    }
+    return;
+  }
+
+  if (ts.isObjectLiteralExpression(node)) {
+    for (const prop of node.properties) {
+      if (ts.isPropertyAssignment(prop)) {
+        bucket.push(getAttributeName(prop.name));
+        collectStringFragments(prop.initializer, bucket);
+      } else if (ts.isShorthandPropertyAssignment(prop)) {
+        bucket.push(prop.name.text);
+      }
+    }
+    return;
+  }
+
+  if (ts.isCallExpression(node)) {
+    for (const arg of node.arguments) {
+      collectStringFragments(arg, bucket);
+    }
+    return;
+  }
+
+  if (ts.isJsxExpression(node)) {
+    collectStringFragments(node.expression ?? undefined, bucket);
+  }
+}
+
+function collectClassTokensFromExpression(node: ts.Expression | undefined, bucket: string[]) {
+  if (!node) {
+    return;
+  }
+
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    pushUnique(bucket, splitClassTokens(node.text));
+    return;
+  }
+
+  if (ts.isTemplateExpression(node)) {
+    pushUnique(bucket, splitClassTokens(node.head.text));
+    for (const span of node.templateSpans) {
+      pushUnique(bucket, splitClassTokens(span.literal.text));
+      collectClassTokensFromExpression(span.expression, bucket);
+    }
+    return;
+  }
+
+  if (ts.isBinaryExpression(node)) {
+    collectClassTokensFromExpression(node.left, bucket);
+    collectClassTokensFromExpression(node.right, bucket);
+    return;
+  }
+
+  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)) {
+    collectClassTokensFromExpression(node.expression, bucket);
+    return;
+  }
+
+  if (ts.isConditionalExpression(node)) {
+    collectClassTokensFromExpression(node.whenTrue, bucket);
+    collectClassTokensFromExpression(node.whenFalse, bucket);
+    return;
+  }
+
+  if (ts.isArrayLiteralExpression(node)) {
+    for (const element of node.elements) {
+      collectClassTokensFromExpression(element as ts.Expression, bucket);
+    }
+    return;
+  }
+
+  if (ts.isObjectLiteralExpression(node)) {
+    for (const prop of node.properties) {
+      if (ts.isPropertyAssignment(prop)) {
+        pushUnique(bucket, splitClassTokens(getAttributeName(prop.name)));
+        collectClassTokensFromExpression(prop.initializer, bucket);
+      } else if (ts.isShorthandPropertyAssignment(prop)) {
+        pushUnique(bucket, splitClassTokens(prop.name.text));
+      }
+    }
+    return;
+  }
+
+  if (ts.isCallExpression(node)) {
+    for (const arg of node.arguments) {
+      collectClassTokensFromExpression(arg as ts.Expression, bucket);
+    }
+    return;
+  }
+
+  if (ts.isJsxExpression(node)) {
+    collectClassTokensFromExpression(node.expression ?? undefined, bucket);
+  }
+}
+
+function collectStyleTokensFromExpression(node: ts.Expression | undefined, bucket: string[]) {
+  if (!node) {
+    return;
+  }
+
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    bucket.push(node.text);
+    return;
+  }
+
+  if (ts.isTemplateExpression(node)) {
+    bucket.push(node.head.text);
+    for (const span of node.templateSpans) {
+      bucket.push(span.literal.text);
+      collectStyleTokensFromExpression(span.expression, bucket);
+    }
+    return;
+  }
+
+  if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node) || ts.isTypeAssertionExpression(node) || ts.isNonNullExpression(node) || ts.isSatisfiesExpression(node)) {
+    collectStyleTokensFromExpression(node.expression, bucket);
+    return;
+  }
+
+  if (ts.isObjectLiteralExpression(node)) {
+    for (const prop of node.properties) {
+      if (ts.isPropertyAssignment(prop)) {
+        bucket.push(getAttributeName(prop.name));
+        collectStyleTokensFromExpression(prop.initializer, bucket);
+      }
+    }
+    return;
+  }
+
+  if (ts.isArrayLiteralExpression(node)) {
+    for (const element of node.elements) {
+      collectStyleTokensFromExpression(element as ts.Expression, bucket);
+    }
+    return;
+  }
+
+  if (ts.isConditionalExpression(node) || ts.isBinaryExpression(node) || ts.isCallExpression(node) || ts.isJsxExpression(node)) {
+    const nodes = ts.isBinaryExpression(node)
+      ? [node.left, node.right]
+      : ts.isConditionalExpression(node)
+        ? [node.whenTrue, node.whenFalse]
+        : ts.isCallExpression(node)
+          ? [...node.arguments]
+          : [node.expression];
+    for (const next of nodes) {
+      collectStyleTokensFromExpression(next as ts.Expression | undefined, bucket);
+    }
+  }
+}
+
+function deriveClassSignals(classTokens: string[]) {
+  const stateSignals: string[] = [];
+  const responsiveSignals: string[] = [];
+
+  for (const token of classTokens) {
+    const parts = token.split(":");
+    if (parts.length > 1) {
+      for (const prefix of parts.slice(0, -1)) {
+        if (INTERACTION_STATE_NAMES.includes(prefix)) {
+          stateSignals.push(prefix);
+        }
+        if (RESPONSIVE_PREFIXES.includes(prefix)) {
+          responsiveSignals.push(prefix);
+        }
+      }
+    }
+
+    const dataState = token.match(/data-\[state=([^\]]+)\]/)?.[1];
+    if (dataState) {
+      stateSignals.push(dataState);
+    }
+
+    if (token === "aria-disabled") {
+      stateSignals.push("disabled");
+    }
+    if (token === "aria-pressed") {
+      stateSignals.push("pressed");
+    }
+    if (token === "aria-selected") {
+      stateSignals.push("selected");
+    }
+  }
+
+  return {
+    stateSignals: uniqueStrings(stateSignals),
+    responsiveSignals: uniqueStrings(responsiveSignals),
+  };
+}
+
+function parseSourceSignals(sourceText: string): SourceSignals {
+  if (!sourceText.trim()) {
+    return emptySourceSignals(sourceText);
+  }
+
+  const sourceFile = ts.createSourceFile("pr.tsx", sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const signals = emptySourceSignals(sourceText);
+
+  const visit = (node: ts.Node) => {
+    if (ts.isImportDeclaration(node)) {
+      const clause = node.importClause;
+      if (clause?.name) {
+        signals.importNames.push(clause.name.text);
+      }
+      if (clause?.namedBindings && ts.isNamedImports(clause.namedBindings)) {
+        for (const specifier of clause.namedBindings.elements) {
+          signals.importNames.push(specifier.name.text);
+        }
+      }
+      if (clause?.namedBindings && ts.isNamespaceImport(clause.namedBindings)) {
+        signals.importNames.push(clause.namedBindings.name.text);
+      }
+    }
+
+    if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
+      signals.jsxTagNames.push(getJsxTagName(node.tagName));
+      for (const attr of node.attributes.properties) {
+        if (!ts.isJsxAttribute(attr)) {
+          continue;
+        }
+
+        const attrName = getAttributeName(attr.name);
+        if (attrName === "className") {
+          const classTokens: string[] = [];
+          if (attr.initializer && ts.isJsxExpression(attr.initializer)) {
+            if (attr.initializer.expression) {
+              collectClassTokensFromExpression(attr.initializer.expression, classTokens);
+            }
+          } else if (attr.initializer && (ts.isStringLiteral(attr.initializer) || ts.isJsxText(attr.initializer))) {
+            pushUnique(classTokens, splitClassTokens(attr.initializer.text));
+          }
+          pushUnique(signals.classTokens, classTokens);
+        }
+
+        if (attrName === "style") {
+          signals.hasInlineStyle = true;
+          if (attr.initializer && ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+            const styleTokens: string[] = [];
+            collectStyleTokensFromExpression(attr.initializer.expression, styleTokens);
+            pushUnique(signals.styleTokens, styleTokens);
+          }
+        }
+
+        if (VARIANT_ATTR_NAMES.has(attrName)) {
+          const variantTokens: string[] = [];
+          if (attr.initializer && ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+            collectStringFragments(attr.initializer.expression, variantTokens);
+          } else if (attr.initializer && ts.isStringLiteral(attr.initializer)) {
+            variantTokens.push(attr.initializer.text);
+          }
+          pushUnique(signals.variantSignals, variantTokens);
+        }
+
+        if (
+          attrName === "disabled" ||
+          attrName === "aria-disabled" ||
+          attrName === "aria-pressed" ||
+          attrName === "aria-selected" ||
+          attrName === "data-state"
+        ) {
+          const stateTokens: string[] = [];
+          if (attr.initializer && ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+            collectStringFragments(attr.initializer.expression, stateTokens);
+          } else if (attr.initializer && ts.isStringLiteral(attr.initializer)) {
+            stateTokens.push(attr.initializer.text);
+          } else if (!attr.initializer) {
+            stateTokens.push(attrName);
+          }
+          pushUnique(signals.stateSignals, stateTokens);
+        }
+      }
+    }
+
+    ts.forEachChild(node, visit);
+  };
+
+  visit(sourceFile);
+
+  const derived = deriveClassSignals(signals.classTokens);
+  signals.stateSignals = uniqueStrings([...signals.stateSignals, ...derived.stateSignals]);
+  signals.responsiveSignals = uniqueStrings([...signals.responsiveSignals, ...derived.responsiveSignals]);
+  signals.jsxTagNames = uniqueStrings(signals.jsxTagNames);
+  signals.importNames = uniqueStrings(signals.importNames);
+  signals.classTokens = uniqueStrings(signals.classTokens);
+  signals.styleTokens = uniqueStrings(signals.styleTokens);
+  signals.variantSignals = uniqueStrings(signals.variantSignals);
+
+  return signals;
+}
 
 function createIssue(
   auditRunId: string,
@@ -317,13 +704,25 @@ export function analyzeDrift(
   const tokenCandidateMap = buildTokenCandidateMap(snapshot);
 
   for (const file of pr.files) {
-    const text = [file.patch ?? "", file.contents ?? ""].join("\n");
-    const fileLower = `${file.filename}\n${text}`.toLowerCase();
-    const normalizedFile = normalizeForMatch(`${file.filename}\n${text}`);
+    const sourceSignals = parseSourceSignals(file.contents ?? "");
+    const text = [sourceSignals.sourceText, file.patch ?? ""].join("\n");
+    const searchableText = [
+      file.filename,
+      ...sourceSignals.jsxTagNames,
+      ...sourceSignals.importNames,
+      ...sourceSignals.classTokens,
+      ...sourceSignals.styleTokens,
+      ...sourceSignals.variantSignals,
+      ...sourceSignals.stateSignals,
+      ...sourceSignals.responsiveSignals,
+    ]
+      .join("\n")
+      .toLowerCase();
+    const normalizedFile = normalizeForMatch(searchableText);
 
     for (const component of snapshot.components) {
       const componentCandidates = buildComponentCandidates(component);
-      const componentMatch = hasCandidateMatch(fileLower, normalizedFile, componentCandidates);
+      const componentMatch = hasCandidateMatch(searchableText, normalizedFile, componentCandidates);
 
       if (!componentMatch) {
         continue;
@@ -331,19 +730,22 @@ export function analyzeDrift(
 
       const componentTokenCandidates = collectComponentTokenCandidates(component, tokenCandidateMap);
       const matchedTokenCandidates = findMatchedCandidates(
-        fileLower,
+        searchableText,
         normalizedFile,
         componentTokenCandidates.map((candidate) => candidate.toLowerCase()),
       );
       const missingPatterns = (component.requiredPatterns ?? []).filter(
-        (pattern) => !text.includes(pattern),
+        (pattern) =>
+          !sourceSignals.classTokens.some((token) => token.includes(pattern)) &&
+          !sourceSignals.styleTokens.some((token) => token.includes(pattern)) &&
+          !text.includes(pattern),
       );
 
       if (
         missingPatterns.length > 0 ||
         (componentTokenCandidates.length > 0 &&
           matchedTokenCandidates.length === 0 &&
-          hasStyleSignals(text))
+          (sourceSignals.classTokens.length > 0 || sourceSignals.styleTokens.length > 0))
       ) {
         issues.push(
           createIssue(
@@ -404,7 +806,7 @@ export function analyzeDrift(
         );
       }
 
-      const stateSignals = detectStateSignals(text);
+      const stateSignals = sourceSignals.stateSignals;
       const expectedStateSignals = uniqueStrings(
         (component.states ?? []).map((state) => normalizeStateSignal(state.name)).filter(Boolean),
       );
@@ -429,17 +831,15 @@ export function analyzeDrift(
         );
       }
 
-      const responsiveSignals = detectResponsiveSignals(text);
+      const responsiveSignals = sourceSignals.responsiveSignals;
       const looksResponsive =
         /(layout|page|card|section|header|footer|sidebar|nav|menu|modal|dialog|drawer|hero|grid)/i.test(
           component.name,
         ) || /responsive/i.test(component.summary ?? "");
-      if (
-        looksResponsive &&
-        /flex|grid|w-full|max-w-|min-w-|basis-|gap-/.test(text) &&
-        !hasBreakpointSpecificClasses(text) &&
-        responsiveSignals.length > 0
-      ) {
+      const hasBaseLayoutSignals = sourceSignals.classTokens.some((token) =>
+        /(?:^|:)(flex|grid|w-full|max-w-|min-w-|basis-|gap-|container)/.test(token),
+      );
+      if (looksResponsive && hasBaseLayoutSignals && responsiveSignals.length === 0) {
         issues.push(
           createIssue(
             auditRunId,
@@ -458,7 +858,7 @@ export function analyzeDrift(
 
       if (component.variants?.length) {
         const allowedVariants = component.variants.map((variant) => variant.name);
-        const detectedVariants = extractLikelyVariants(text);
+        const detectedVariants = sourceSignals.variantSignals;
         const unexpectedVariants = detectedVariants.filter(
           (variant) =>
             !allowedVariants.some(
