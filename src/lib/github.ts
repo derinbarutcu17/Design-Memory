@@ -1,22 +1,96 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
 import type { PullRequestDetails, PullRequestFile, PullRequestSummary } from "@/lib/types";
 
-const execFileAsync = promisify(execFile);
+const GITHUB_API_BASE = "https://api.github.com";
+const GITHUB_API_VERSION = "2022-11-28";
 
-async function ghJson<T>(args: string[]) {
-  const { stdout } = await execFileAsync("gh", ["api", ...args], {
-    maxBuffer: 10 * 1024 * 1024,
+type GitHubApiErrorBody = {
+  message?: string;
+  documentation_url?: string;
+};
+
+class GitHubApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "GitHubApiError";
+    this.status = status;
+  }
+}
+
+function getGitHubToken(required = false) {
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN ?? process.env.GITHUB_PAT;
+
+  if (!token && required) {
+    throw new GitHubApiError(
+      "Missing GitHub token. Set GITHUB_TOKEN, GH_TOKEN, or GITHUB_PAT in the environment.",
+      401,
+    );
+  }
+
+  return token;
+}
+
+async function githubRequest<T>(pathname: string, init?: RequestInit, requiredToken = false) {
+  const token = getGitHubToken(requiredToken);
+  const url = `${GITHUB_API_BASE}/${pathname.replace(/^\//, "")}`;
+  const response = await fetch(url, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init?.headers ?? {}),
+    },
   });
-  return JSON.parse(stdout) as T;
+
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const body = (await response.json()) as GitHubApiErrorBody;
+      detail = body.message ?? detail;
+    } catch {
+      // Keep HTTP status text when the body is not JSON.
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new GitHubApiError(
+        token
+          ? `GitHub rejected the request. Check token permissions and repo access. (${detail})`
+          : "GitHub rejected the request. Set GITHUB_TOKEN, GH_TOKEN, or GITHUB_PAT.",
+        response.status,
+      );
+    }
+
+    throw new GitHubApiError(`GitHub API request failed: ${detail}`, response.status);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function fetchPaginatedJson<T>(pathname: string, perPage = 100) {
+  const items: T[] = [];
+  let page = 1;
+
+  while (true) {
+    const separator = pathname.includes("?") ? "&" : "?";
+    const batch = await githubRequest<T[]>(`${pathname}${separator}per_page=${perPage}&page=${page}`);
+    items.push(...batch);
+    if (batch.length < perPage) {
+      break;
+    }
+    page += 1;
+  }
+
+  return items;
 }
 
 async function fetchFileContents(owner: string, repo: string, path: string, ref: string) {
   try {
-    const response = await ghJson<{ content?: string; encoding?: string }>([
-      `repos/${owner}/${repo}/contents/${path}?ref=${ref}`,
-    ]);
+    const response = await githubRequest<{ content?: string; encoding?: string }>(
+      `repos/${owner}/${repo}/contents/${path}?ref=${encodeURIComponent(ref)}`,
+    );
 
     if (response.encoding === "base64" && response.content) {
       return Buffer.from(response.content.replace(/\n/g, ""), "base64").toString("utf8");
@@ -32,19 +106,14 @@ function isUiFile(fileName: string) {
   return /\.(tsx|jsx|ts|js|css|scss)$/.test(fileName);
 }
 
-export async function listOpenPullRequests(
-  owner: string,
-  repo: string,
-): Promise<PullRequestSummary[]> {
-  const pulls = await ghJson<
-    Array<{
-      number: number;
-      title: string;
-      html_url: string;
-      updated_at: string;
-      user?: { login?: string };
-    }>
-  >([`repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc&per_page=10`]);
+export async function listOpenPullRequests(owner: string, repo: string): Promise<PullRequestSummary[]> {
+  const pulls = await fetchPaginatedJson<{
+    number: number;
+    title: string;
+    html_url: string;
+    updated_at: string;
+    user?: { login?: string };
+  }>(`repos/${owner}/${repo}/pulls?state=open&sort=updated&direction=desc`);
 
   return pulls.map((pull) => ({
     number: pull.number,
@@ -66,15 +135,14 @@ export async function postPullRequestComment(
   prNumber: number,
   body: string,
 ) {
-  await execFileAsync("gh", [
-    "pr",
-    "comment",
-    String(prNumber),
-    "--repo",
-    `${owner}/${repo}`,
-    "--body",
-    body,
-  ]);
+  await githubRequest(
+    `repos/${owner}/${repo}/issues/${prNumber}/comments`,
+    {
+      method: "POST",
+      body: JSON.stringify({ body }),
+    },
+    true,
+  );
 }
 
 export async function fetchPullRequest(
@@ -82,25 +150,23 @@ export async function fetchPullRequest(
   repo: string,
   prNumber: number,
 ): Promise<PullRequestDetails> {
-  const pr = await ghJson<{
+  const pr = await githubRequest<{
     number: number;
     title: string;
     html_url: string;
     updated_at: string;
     head: { sha: string };
-  }>([`repos/${owner}/${repo}/pulls/${prNumber}`]);
+  }>(`repos/${owner}/${repo}/pulls/${prNumber}`);
 
-  const files = await ghJson<
-    Array<{
-      filename: string;
-      status: string;
-      patch?: string;
-      additions: number;
-      deletions: number;
-      changes: number;
-      contents_url?: string;
-    }>
-  >([`repos/${owner}/${repo}/pulls/${prNumber}/files?per_page=100`]);
+  const files = await fetchPaginatedJson<{
+    filename: string;
+    status: string;
+    patch?: string;
+    additions: number;
+    deletions: number;
+    changes: number;
+    contents_url?: string;
+  }>(`repos/${owner}/${repo}/pulls/${prNumber}/files`);
 
   const hydratedFiles: PullRequestFile[] = [];
 
