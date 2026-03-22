@@ -4,20 +4,6 @@ export type ReviewStatus = 'intentional' | 'ignore';
 export type DriftStatus = 'new' | 'remaining' | 'resolved' | 'reopened' | 'intentional' | 'ignored';
 export type DetectionSource = 'deterministic' | 'llm-assisted';
 
-export type Project = {
-  id: string;
-  name: string;
-  referenceProvider: 'figma' | 'stitch';
-  figmaUrl?: string;
-  stitchUrl?: string;
-  repoUrl?: string;
-  repoOwner: string;
-  repoName: string;
-  figmaFileKey?: string;
-  createdAt: string;
-  updatedAt: string;
-};
-
 export type ReferenceToken = {
   name: string;
   kind?: string;
@@ -69,15 +55,6 @@ export type ReferenceSnapshot = {
   tokens: ReferenceToken[];
   components: ComponentReference[];
   aliasMap?: Record<string, string[]>;
-};
-
-export type ReferenceSnapshotRecord = {
-  id: string;
-  projectId: string;
-  versionLabel: string;
-  sourceType: string;
-  snapshot: ReferenceSnapshot;
-  createdAt: string;
 };
 
 export type AuditSummary = {
@@ -158,38 +135,4 @@ export type ReviewStore = {
 export type BaselineStore = {
   acceptedFingerprints: Record<string, string>;
   createdAt: string;
-};
-
-export type ProjectDetails = {
-  project: Project;
-  latestSnapshot: ReferenceSnapshotRecord | null;
-  auditRuns: AuditRun[];
-};
-
-export type PullRequestFile = {
-  filename: string;
-  status: string;
-  patch?: string;
-  additions: number;
-  deletions: number;
-  changes: number;
-  contentsUrl?: string;
-  contents?: string;
-};
-
-export type PullRequestDetails = {
-  number: number;
-  title: string;
-  headSha: string;
-  url: string;
-  updatedAt?: string;
-  files: PullRequestFile[];
-};
-
-export type PullRequestSummary = {
-  number: number;
-  title: string;
-  url: string;
-  updatedAt: string;
-  authorLogin?: string;
 };

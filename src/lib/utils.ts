@@ -1,9 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
 
-export function cn(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(" ");
-}
-
 export function normalizeForMatch(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -57,13 +53,6 @@ export function generateNameCandidates(value: string) {
   ]);
 }
 
-export function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
-
 export function makeId(prefix: string) {
   return `${prefix}_${randomUUID().slice(0, 8)}`;
 }
@@ -74,55 +63,4 @@ export function hashParts(parts: string[]) {
 
 export function prettyJson(value: unknown) {
   return JSON.stringify(value, null, 2);
-}
-
-export function parseFigmaUrl(url: string) {
-  try {
-    const parsed = new URL(url);
-    const parts = parsed.pathname.split("/").filter(Boolean);
-    const designIndex = parts.findIndex((part) => part === "design" || part === "file");
-    const figmaFileKey = designIndex >= 0 ? parts[designIndex + 1] : undefined;
-
-    if (!figmaFileKey) {
-      throw new Error("Could not find a Figma file key in that URL.");
-    }
-
-    return { figmaFileKey };
-  } catch {
-    throw new Error("Enter a valid Figma file URL.");
-  }
-}
-
-export function ensureOptionalUrl(value: string) {
-  const trimmed = value.trim();
-
-  if (!trimmed) {
-    return undefined;
-  }
-
-  try {
-    return new URL(trimmed).toString();
-  } catch {
-    throw new Error("Enter a valid Stitch URL.");
-  }
-}
-
-export function parseGitHubRepoUrl(url: string) {
-  try {
-    const parsed = new URL(url);
-    const parts = parsed.pathname.split("/").filter(Boolean);
-    const owner = parts[0];
-    const repo = parts[1];
-
-    if (!owner || !repo) {
-      throw new Error("Missing owner or repo.");
-    }
-
-    return {
-      owner,
-      repo: repo.replace(/\.git$/, ""),
-    };
-  } catch {
-    throw new Error("Enter a valid GitHub repository URL.");
-  }
 }

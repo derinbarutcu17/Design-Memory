@@ -37,7 +37,7 @@ design-memory ghost
 From this repository:
 
 ```bash
-cd /Users/derin/Desktop/CODING/design-memory
+cd /path/to/design-memory
 npm install
 npm run build
 npm link
