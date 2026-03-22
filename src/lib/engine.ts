@@ -9,9 +9,8 @@ export interface BrainConfig {
 
 type FetchLike = typeof fetch;
 
-function readProviderPreference() {
+function readProviderPreference(cwd = process.cwd()) {
   try {
-    const cwd = process.cwd();
     const configPath = `${cwd}/design-memory.config.json`;
     const fs = require('node:fs') as typeof import('node:fs');
     if (!fs.existsSync(configPath)) {
@@ -43,8 +42,8 @@ async function isReachable(url: string, fetchFn: FetchLike) {
   }
 }
 
-export async function detectAvailableBrain(fetchFn: FetchLike = fetch): Promise<BrainConfig | null> {
-  const preferences = readProviderPreference();
+export async function detectAvailableBrain(fetchFn: FetchLike = fetch, cwd = process.cwd()): Promise<BrainConfig | null> {
+  const preferences = readProviderPreference(cwd);
 
   if (preferences.includes('local')) {
     if (await isReachable('http://localhost:11434/api/tags', fetchFn)) {

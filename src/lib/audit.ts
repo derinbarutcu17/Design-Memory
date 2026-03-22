@@ -523,7 +523,7 @@ export async function runAudit(deps: AuditDependencies = {}, options: AuditOptio
   const getFileContent = deps.getFileContent ?? ((filePath: string, targetCwd?: string) => getStagedFileContent(filePath, targetCwd ?? cwd));
   const getSnapshot = deps.getSnapshot ?? loadReferenceSnapshot;
   const resolveSnapshot = deps.resolveSnapshot ?? resolveReferenceSnapshot;
-  const getBrain = deps.getBrain ?? detectAvailableBrain;
+  const getBrain = deps.getBrain ?? ((fetchFn?: typeof fetch) => detectAvailableBrain(fetchFn ?? fetch, cwd));
   const askBrain = deps.askBrain ?? promptBrain;
   const exit = deps.exit ?? process.exit;
 
