@@ -6,7 +6,7 @@ import { resolveReferenceSnapshot } from './context';
 import { detectAvailableBrain, promptBrain } from './engine';
 import { readConfig, type DesignMemoryConfig, type RuleId, type RuleSeverity } from './config';
 import { getPullRequestScan, type PullRequestScan } from './github';
-import { createBaseline, loadBaseline, loadLatestRun, loadReferenceSnapshot, loadReviews, makeRunId, saveAuditRun } from './state';
+import { createBaseline, loadBaseline, loadLatestRun, loadReferenceSnapshot, loadReviews, loadRunHistory, makeRunId, saveAuditRun } from './state';
 import type { AuditRun, DetectionSource, DriftIssue, ReferenceSnapshot } from './types';
 import { hashParts, normalizeForMatch, prettyJson, toPascalCase, uniqueStrings } from './utils';
 
@@ -407,8 +407,15 @@ function applyReviewAndBaselineState(issues: DriftIssue[], cwd: string) {
   const reviews = loadReviews(cwd).reviews;
   const baseline = loadBaseline(cwd);
   const previousRun = loadLatestRun(cwd);
+  const runHistory = loadRunHistory(cwd);
   const previousFingerprints = new Set(previousRun?.issues.filter((issue) => ['new', 'remaining', 'reopened', 'intentional', 'ignored'].includes(issue.status)).map((issue) => issue.fingerprint) ?? []);
   const previousIssueKeys = new Map((previousRun?.issues ?? []).map((issue) => [getIssueKey(issue), issue.fingerprint]));
+  const historicalIssueKeys = new Map(
+    runHistory
+      .flatMap((run) => run.issues)
+      .map((issue) => [getIssueKey(issue), issue.fingerprint] as const),
+  );
+  const historicalFingerprints = new Set(runHistory.flatMap((run) => run.issues.map((issue) => issue.fingerprint)));
   const baselineFingerprints = new Set(Object.keys(baseline?.acceptedFingerprints ?? {}));
 
   return issues.map((issue) => {
@@ -421,6 +428,13 @@ function applyReviewAndBaselineState(issues: DriftIssue[], cwd: string) {
     }
     const previousFingerprintForKey = previousIssueKeys.get(getIssueKey(issue));
     if (previousFingerprintForKey && previousFingerprintForKey !== issue.fingerprint) {
+      return { ...issue, status: 'reopened' as const };
+    }
+    if (historicalFingerprints.has(issue.fingerprint) && !previousFingerprints.has(issue.fingerprint)) {
+      return { ...issue, status: 'reopened' as const };
+    }
+    const historicalFingerprintForKey = historicalIssueKeys.get(getIssueKey(issue));
+    if (historicalFingerprintForKey && !previousFingerprints.has(issue.fingerprint) && historicalFingerprintForKey !== issue.fingerprint) {
       return { ...issue, status: 'reopened' as const };
     }
     if (previousFingerprints.has(issue.fingerprint) || baselineFingerprints.has(issue.fingerprint)) {

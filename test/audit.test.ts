@@ -247,3 +247,37 @@ test('runAudit uses PR file contents for scan mode contract checks', async () =>
   const latestRun = JSON.parse(fs.readFileSync(path.join(cwd, '.design-memory', 'latest-run.json'), 'utf-8')) as { issues: Array<{ ruleId: string }> };
   assert.ok(!latestRun.issues.some((issue) => issue.ruleId === 'component.required-pattern'));
 });
+
+test('runAudit marks issues as reopened when they return after skipping a run', async () => {
+  const cwd = makeTempDir();
+  writeConfig(cwd);
+  writeSnapshot(cwd);
+
+  let exitCode: number | undefined;
+  const exit = ((code?: number) => {
+    exitCode = code;
+    return undefined as never;
+  }) as typeof process.exit;
+
+  await runAudit({
+    getDiff: () => 'FILE: src/components/Button.tsx\n+ className="rounded-[14px] bg-primary"\n',
+    getFileContent: () => 'export function Button() { return <button className="rounded-[14px] bg-primary" />; }',
+    exit,
+  }, { cwd });
+
+  await runAudit({
+    getDiff: () => 'FILE: src/components/Button.tsx\n+ className="bg-primary hover:bg-primary"\n',
+    getFileContent: () => 'export function Button() { return <button className="bg-primary hover:bg-primary" />; }',
+    exit,
+  }, { cwd });
+
+  await runAudit({
+    getDiff: () => 'FILE: src/components/Button.tsx\n+ className="rounded-[14px] bg-primary"\n',
+    getFileContent: () => 'export function Button() { return <button className="rounded-[14px] bg-primary" />; }',
+    exit,
+  }, { cwd });
+
+  const latestRun = JSON.parse(fs.readFileSync(path.join(cwd, '.design-memory', 'latest-run.json'), 'utf-8')) as { issues: Array<{ status: string; ruleId: string }> };
+  assert.ok(latestRun.issues.some((issue) => issue.ruleId === 'tailwind.arbitrary-radius' && issue.status === 'reopened'));
+  assert.equal(exitCode, 1);
+});

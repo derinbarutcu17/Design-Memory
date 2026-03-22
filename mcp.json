@@ -17,7 +17,7 @@
       },
       "execution": {
         "command": "node",
-        "args": ["dist/cli/index.js", "audit"]
+        "args": ["dist/cli/index.js", "audit", "--cwd", "${cwd}"]
       }
     }
   ]

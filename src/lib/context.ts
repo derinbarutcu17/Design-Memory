@@ -3,7 +3,7 @@ import path from 'node:path';
 
 import { readConfig } from './config';
 import type { ReferenceSnapshot } from './types';
-import { normalizeDesignMarkdown } from './design-md/normalize';
+import { normalizeDesignMarkdownWithOptions } from './design-md/normalize';
 import { syncReferenceSnapshotFromFigma } from './figma/normalize-reference';
 import { normalizeStitchReference } from './stitch/normalize';
 
@@ -86,5 +86,7 @@ export async function resolveReferenceSnapshot(cwd = process.cwd()): Promise<Ref
     });
   }
 
-  return normalizeDesignMarkdown(markdown, path.basename(resolvedPath));
+  return normalizeDesignMarkdownWithOptions(markdown, path.basename(resolvedPath), {
+    strict: config.reference.strictDesignMd,
+  });
 }

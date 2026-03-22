@@ -46,6 +46,10 @@ type Section = {
   lines: string[];
 };
 
+type NormalizeDesignMarkdownOptions = {
+  strict?: boolean;
+};
+
 function toSections(markdown: string) {
   const sections: Section[] = [];
   let current: Section | null = null;
@@ -107,7 +111,7 @@ function extractVariants(lines: string[]) {
   return extractNamedList(lines, 'variants?', VARIANT_WORDS).map((name) => ({ name }));
 }
 
-function extractPatternLines(lines: string[], mode: 'required' | 'disallowed') {
+function extractPatternLines(lines: string[], mode: 'required' | 'disallowed', strict = false) {
   const filtered = lines
     .map((line) => ({
       original: line,
@@ -116,6 +120,11 @@ function extractPatternLines(lines: string[], mode: 'required' | 'disallowed') {
     .filter((entry) => entry.cleaned.length > 0)
     .filter((entry) => {
       const normalized = entry.cleaned.toLowerCase();
+      if (strict) {
+        return mode === 'required'
+          ? /^required\s*:|^must use\s*:|^should use\s*:/.test(normalized)
+          : /^disallowed\s*:|^do not use\s*:|^avoid\s*:|^never use\s*:/.test(normalized);
+      }
       return mode === 'required'
         ? normalized.includes('must use') || normalized.includes('should use') || normalized.includes('required')
         : normalized.includes('do not use') || normalized.includes('avoid ') || normalized.includes('disallow') || normalized.includes('never use');
@@ -127,14 +136,14 @@ function extractPatternLines(lines: string[], mode: 'required' | 'disallowed') {
   ]);
 }
 
-function extractComponentReferences(markdown: string): ComponentReference[] {
+function extractComponentReferences(markdown: string, strict = false): ComponentReference[] {
   const sections = toSections(markdown);
   const references = sections
     .filter((section) => !GENERIC_HEADINGS.has(section.heading.toLowerCase()))
     .map((section) => {
       const inlineCodes = extractInlineCodes(section.lines);
-      const requiredPatterns = extractPatternLines(section.lines, 'required');
-      const disallowedPatterns = extractPatternLines(section.lines, 'disallowed');
+      const requiredPatterns = extractPatternLines(section.lines, 'required', strict);
+      const disallowedPatterns = extractPatternLines(section.lines, 'disallowed', strict);
       const tokensUsed = inlineCodes.filter((code) => /(bg-|text-|border-|ring-|rounded-|shadow-)/.test(code));
 
       return {
@@ -169,6 +178,28 @@ export function normalizeDesignMarkdown(markdown: string, fileName = 'DESIGN.md'
   const codeTokens = extractCodeTokens(markdown);
   const allTokens = [...hexTokens, ...codeTokens];
   const components = extractComponentReferences(markdown);
+
+  return buildDesignSnapshot(allTokens, components, fileName);
+}
+
+export function normalizeDesignMarkdownWithOptions(
+  markdown: string,
+  fileName = 'DESIGN.md',
+  options: NormalizeDesignMarkdownOptions = {},
+): ReferenceSnapshot {
+  const hexTokens = extractHexTokens(markdown);
+  const codeTokens = extractCodeTokens(markdown);
+  const allTokens = [...hexTokens, ...codeTokens];
+  const components = extractComponentReferences(markdown, options.strict ?? false);
+
+  return buildDesignSnapshot(allTokens, components, fileName);
+}
+
+function buildDesignSnapshot(
+  allTokens: ReferenceToken[],
+  components: ComponentReference[],
+  fileName: string,
+): ReferenceSnapshot {
 
   return {
     metadata: {

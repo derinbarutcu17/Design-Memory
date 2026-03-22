@@ -103,6 +103,45 @@ test('resolveReferenceSnapshot only extracts states from explicit state lists', 
   assert.deepEqual(snapshot.components[0]?.states?.map((state) => state.name), ['hover', 'focus']);
 });
 
+test('resolveReferenceSnapshot supports strict design-md pattern extraction', async () => {
+  const cwd = makeTempDir();
+  fs.writeFileSync(path.join(cwd, 'spec.md'), '# Alternate spec\n## Button\n- Use `bg-primary`\n- Must use: `rounded-md`\n- Disallowed: `style={{`\n');
+  fs.writeFileSync(
+    path.join(cwd, 'design-memory.config.json'),
+    JSON.stringify({
+      strictness: 'block',
+      stateDir: '.design-memory',
+      reference: {
+        sourceType: 'design-md',
+        path: './spec.md',
+        strictDesignMd: true,
+      },
+      include: [],
+      exclude: [],
+      rules: {
+        'color.raw-hex': 'error',
+        'tailwind.arbitrary-spacing': 'error',
+        'tailwind.arbitrary-radius': 'error',
+        'tailwind.arbitrary-font-size': 'warn',
+        'style.inline': 'error',
+        'token.mismatch': 'error',
+        'component.required-pattern': 'error',
+        'component.disallowed-pattern': 'error',
+        'component.variant-drift': 'warn',
+        'component.missing-state': 'warn',
+      },
+      baseline: { mode: 'net-new-only' },
+      llmFallback: { enabled: false, mode: 'explain-only' },
+      ai: { providerPreference: ['local'], maxRetries: 1 },
+      visualProvider: 'none',
+    }),
+  );
+
+  const snapshot = await resolveReferenceSnapshot(cwd);
+  assert.deepEqual(snapshot.components[0]?.requiredPatterns, ['rounded-md']);
+  assert.deepEqual(snapshot.components[0]?.disallowedPatterns, ['style={{']);
+});
+
 test('resolveReferenceSnapshot throws when the configured source file is missing', async () => {
   const cwd = makeTempDir();
   fs.writeFileSync(

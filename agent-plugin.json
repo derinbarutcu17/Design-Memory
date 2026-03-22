@@ -12,5 +12,5 @@
     "required": [],
     "additionalProperties": false
   },
-  "execution": "node dist/cli/index.js audit"
+  "execution": "node dist/cli/index.js audit --cwd ${cwd}"
 }

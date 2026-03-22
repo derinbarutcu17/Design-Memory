@@ -61,6 +61,8 @@ git add .
 design-memory audit
 ```
 
+For agent tooling or remote orchestration, the same commands accept `--cwd /absolute/path/to/repo`.
+
 ## Canonical Config
 
 `design-memory init` writes `design-memory.config.json` if it does not exist.
@@ -74,7 +76,8 @@ design-memory audit
     "path": "./DESIGN.md",
     "figmaFileKey": "",
     "figmaUrl": "",
-    "stitchPath": ""
+    "stitchPath": "",
+    "strictDesignMd": false
   },
   "include": ["src/components/**/*.tsx", "src/app/**/*.tsx"],
   "exclude": ["src/lib/**", "**/*.test.tsx", "**/*.test.ts"],
@@ -104,6 +107,8 @@ design-memory audit
   "visualProvider": "none"
 }
 ```
+
+Set `"reference.strictDesignMd": true` if you want `DESIGN.md` parsing to only trust explicit contract lines such as `States: ...`, `Variants: ...`, `Must use: ...`, and `Disallowed: ...`.
 
 ## Reference Snapshot Flow
 
